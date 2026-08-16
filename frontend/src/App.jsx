@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import TechBackground from "./TechBackground";
 import "./App.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? "http://127.0.0.1:8000" : "https://help-me-zdr2.onrender.com");
@@ -348,6 +349,7 @@ function App() {
   if (showLanding) {
     return (
       <div className="brutalist-landing-container">
+        <TechBackground />
         {/* TopNavBar */}
         <header className="brutalist-header">
           <div className="brutalist-logo">HELPME AI</div>

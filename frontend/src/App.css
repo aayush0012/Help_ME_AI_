@@ -1050,7 +1050,9 @@ body {
   flex-direction: column;
   width: 100vw;
   height: 100vh;
-  background-color: #121315;
+  background-color: transparent;
+  position: relative;
+  z-index: 1;
   color: #e3e2e4;
   overflow-y: auto;
   overflow-x: hidden;
@@ -1142,6 +1144,8 @@ body {
 /* Main */
 .brutalist-main {
   flex-grow: 1;
+  position: relative;
+  z-index: 2;
 }
 
 .brutalist-hero {
@@ -1169,7 +1173,7 @@ body {
 
 /* Upload Box */
 .brutalist-upload-box {
-  background-color: #292a2c;
+  background-color: #1a1c22;
   border: 3px solid #38bdf8;
   box-shadow: 5px 5px 0px 0px #38bdf8;
   width: 100%;
