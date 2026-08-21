@@ -104,6 +104,7 @@ class StudyAgent:
         try:
             response = self.llm.invoke(prompt)
             verdict = response.content.strip().lower()
+            verdict = re.sub(r"<think>.*?</think>", "", verdict, flags=re.DOTALL).strip()
             print("Document Relevance Verdict: " + verdict)
             
             if "yes" in verdict:
@@ -264,6 +265,7 @@ class StudyAgent:
         try:
             response = self.llm.invoke(prompt)
             verdict = response.content.strip().lower()
+            verdict = re.sub(r"<think>.*?</think>", "", verdict, flags=re.DOTALL).strip()
             print("Hallucination Grader Verdict: " + verdict)
 
             has_web = False
