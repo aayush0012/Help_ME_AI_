@@ -7,7 +7,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
-import fitz
+import pymupdf
 import base64
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
@@ -20,7 +20,7 @@ chunk_overlap_val = 200
 def run_cloud_ocr(file_path):
     print("Opening PDF with PyMuPDF for cloud transcription...")
     try:
-        doc = fitz.open(file_path)
+        doc = pymupdf.open(file_path)
     except Exception as e:
         print(e)
         return []
