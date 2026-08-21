@@ -33,17 +33,17 @@ if not groq_api_key:
     sys.exit(1)
 
 primary_llm = ChatGroq(
-    model="openai/gpt-oss-120b",
+    model="groq/compound-mini",
     temperature=0.0,
     groq_api_key=groq_api_key
 )
 fallback_llm1 = ChatGroq(
-    model="qwen/qwen3.6-27b",
+    model="groq/compound",
     temperature=0.0,
     groq_api_key=groq_api_key
 )
 fallback_llm2 = ChatGroq(
-    model="openai/gpt-oss-20b",
+    model="qwen/qwen3.6-27b",
     temperature=0.0,
     groq_api_key=groq_api_key
 )

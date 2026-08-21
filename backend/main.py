@@ -80,15 +80,15 @@ def get_llm():
             detail="GROQ_API_KEY environment variable is not set. Please configure it in your settings."
         )
     primary_llm = ChatGroq(
-        model="openai/gpt-oss-120b",
+        model="groq/compound-mini",
         api_key=api_key,
     )
     fallback_llm1 = ChatGroq(
-        model="qwen/qwen3.6-27b",
+        model="groq/compound",
         api_key=api_key,
     )
     fallback_llm2 = ChatGroq(
-        model="openai/gpt-oss-20b",
+        model="qwen/qwen3.6-27b",
         api_key=api_key,
     )
     return primary_llm.with_fallbacks([fallback_llm1, fallback_llm2])

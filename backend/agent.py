@@ -223,6 +223,7 @@ class StudyAgent:
         try:
             response = self.llm.invoke(prompt)
             generation = response.content.strip()
+            generation = re.sub(r"<think>.*?</think>", "", generation, flags=re.DOTALL).strip()
         except Exception as e:
             print(f"Error in node_generate LLM invocation: {e}")
             generation = "Error generating answer."
