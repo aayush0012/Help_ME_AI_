@@ -227,7 +227,11 @@ class StudyAgent:
             generation = re.sub(r"<think>.*?</think>", "", generation, flags=re.DOTALL).strip()
         except Exception as e:
             print(f"Error in node_generate LLM invocation: {e}")
-            generation = "Error generating answer."
+            err_str = str(e).lower()
+            if "groq_api_key" in err_str or "api_key" in err_str or "401" in err_str or "unauthorized" in err_str:
+                generation = "Error generating answer: GROQ_API_KEY environment variable is missing or invalid in deployment settings."
+            else:
+                generation = "Error generating answer."
 
         return {
             "generation": generation,
