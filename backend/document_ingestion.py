@@ -162,9 +162,8 @@ def make_doc_id(doc):
     return hashed
 
 def create_vectorstore(documents, persist_directory=None):
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    from main import get_embeddings
+    embeddings = get_embeddings()
 
     if persist_directory is None:
         base_dir = os.path.dirname(os.path.abspath(__file__))
