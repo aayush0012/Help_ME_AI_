@@ -2,16 +2,14 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEndpointEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from hybrid_retrieval import hybrid_retrieve
 
 k_val = 5
 
 def load_db():
-    hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") or os.getenv("HF_TOKEN")
-    embeds = HuggingFaceEndpointEmbeddings(
-        model="sentence-transformers/all-MiniLM-L6-v2",
-        huggingfacehub_api_token=hf_token
+    embeds = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     
     current_dir = os.path.dirname(os.path.abspath(__file__))

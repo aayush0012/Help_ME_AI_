@@ -19,7 +19,7 @@ from document_ingestion import (
 from hybrid_retrieval import hybrid_retrieve
 from agent import StudyAgent
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEndpointEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -80,29 +80,22 @@ def get_llm():
             detail="GROQ_API_KEY environment variable is not set. Please configure it in your settings."
         )
     primary_llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         api_key=api_key,
     )
     fallback_llm1 = ChatGroq(
-        model="llama-3.1-8b-instant",
+        model="qwen/qwen3.6-27b",
         api_key=api_key,
     )
     fallback_llm2 = ChatGroq(
-        model="mixtral-8x7b-32768",
+        model="openai/gpt-oss-20b",
         api_key=api_key,
     )
     return primary_llm.with_fallbacks([fallback_llm1, fallback_llm2])
 
 def get_embeddings():
-    hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") or os.getenv("HF_TOKEN")
-    if not hf_token:
-        raise HTTPException(
-            status_code=500,
-            detail="HUGGINGFACEHUB_API_TOKEN or HF_TOKEN environment variable is not set. Please configure it in your settings."
-        )
-    embeds = HuggingFaceEndpointEmbeddings(
-        model="sentence-transformers/all-MiniLM-L6-v2",
-        huggingfacehub_api_token=hf_token
+    embeds = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     return embeds
 

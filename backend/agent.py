@@ -224,7 +224,7 @@ class StudyAgent:
             response = self.llm.invoke(prompt)
             generation = response.content.strip()
         except Exception as e:
-            print(e)
+            print(f"Error in node_generate LLM invocation: {e}")
             generation = "Error generating answer."
 
         return {
