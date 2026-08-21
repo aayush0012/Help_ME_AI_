@@ -91,7 +91,11 @@ def get_llm():
         model="qwen/qwen3.6-27b",
         api_key=api_key,
     )
-    return primary_llm.with_fallbacks([fallback_llm1, fallback_llm2])
+    fallback_llm3 = ChatGroq(
+        model="openai/gpt-oss-20b",
+        api_key=api_key,
+    )
+    return primary_llm.with_fallbacks([fallback_llm1, fallback_llm2, fallback_llm3])
 
 def get_embeddings():
     embeds = HuggingFaceEmbeddings(
