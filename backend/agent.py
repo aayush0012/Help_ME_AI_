@@ -103,7 +103,8 @@ class StudyAgent:
 
         try:
             response = self.llm.invoke(prompt)
-            verdict = response.content.strip().lower()
+            raw_text = str(response.content) if hasattr(response, "content") and response.content is not None else str(response or "")
+            verdict = raw_text.strip().lower()
             verdict = re.sub(r"<think>.*?</think>", "", verdict, flags=re.DOTALL).strip()
             print("Document Relevance Verdict: " + verdict)
             
@@ -223,8 +224,20 @@ class StudyAgent:
 
         try:
             response = self.llm.invoke(prompt)
-            generation = response.content.strip()
-            generation = re.sub(r"<think>.*?</think>", "", generation, flags=re.DOTALL).strip()
+            raw_text = ""
+            if hasattr(response, "content") and response.content is not None:
+                if isinstance(response.content, str):
+                    raw_text = response.content
+                elif isinstance(response.content, list):
+                    raw_text = " ".join([item.get("text", "") if isinstance(item, dict) else str(item) for item in response.content])
+                else:
+                    raw_text = str(response.content)
+            else:
+                raw_text = str(response or "")
+
+            generation = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+            if not generation:
+                generation = "Information not found in notes."
         except Exception as e:
             print(f"Error in node_generate LLM invocation: {e}")
             err_msg = str(e)
@@ -268,7 +281,8 @@ class StudyAgent:
 
         try:
             response = self.llm.invoke(prompt)
-            verdict = response.content.strip().lower()
+            raw_text = str(response.content) if hasattr(response, "content") and response.content is not None else str(response or "")
+            verdict = raw_text.strip().lower()
             verdict = re.sub(r"<think>.*?</think>", "", verdict, flags=re.DOTALL).strip()
             print("Hallucination Grader Verdict: " + verdict)
 

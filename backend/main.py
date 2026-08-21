@@ -79,6 +79,7 @@ def get_llm():
             status_code=500,
             detail="GROQ_API_KEY environment variable is not set. Please configure it in your settings."
         )
+    api_key = api_key.strip("'\" \t\r\n")
     primary_llm = ChatGroq(
         model="groq/compound-mini",
         api_key=api_key,
