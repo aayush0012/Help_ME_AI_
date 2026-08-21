@@ -32,6 +32,79 @@ load_dotenv()
 
 app = FastAPI()
 
+base_dir = os.path.dirname(os.path.abspath(__file__))
+upload_folder = os.path.join(base_dir, "uploads")
+persist_dir = os.path.join(base_dir, "chroma_db")
+frontend_dist_path = os.path.abspath(os.path.join(base_dir, "../frontend/dist"))
+
+os.makedirs(upload_folder, exist_ok=True)
+
+def get_session_paths(session_id, create=True):
+    if not session_id or not re.match(r"^[a-zA-Z0-9_\-]+$", session_id):
+        return upload_folder, persist_dir
+    
+    session_upload = os.path.join(upload_folder, session_id)
+    session_persist = os.path.join(persist_dir, session_id)
+    if create:
+        os.makedirs(session_upload, exist_ok=True)
+        os.makedirs(session_persist, exist_ok=True)
+    return session_upload, session_persist
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_origin_regex=r"https?://.*",
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    headers = {"Access-Control-Allow-Origin": "*"}
+    if exc.headers:
+        headers.update(exc.headers)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=headers,
+    )
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {str(exc)}"},
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+def get_llm():
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="GROQ_API_KEY environment variable is not set. Please configure it in your settings."
+        )
+    api_key = api_key.strip("'\" \t\r\n")
+    primary_llm = ChatGroq(
+        model="groq/compound-mini",
+        api_key=api_key,
+    )
+    fallback_llm1 = ChatGroq(
+        model="groq/compound",
+        api_key=api_key,
+    )
+    fallback_llm2 = ChatGroq(
+        model="qwen/qwen3.6-27b",
+        api_key=api_key,
+    )
+    fallback_llm3 = ChatGroq(
+        model="openai/gpt-oss-20b",
+        api_key=api_key,
+    )
+    return primary_llm.with_fallbacks([fallback_llm1, fallback_llm2, fallback_llm3])
+
 _embeddings_instance = None
 
 def get_embeddings():
