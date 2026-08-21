@@ -110,34 +110,16 @@ _embeddings_instance = None
 def get_embeddings():
     global _embeddings_instance
     if _embeddings_instance is None:
-        hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") or os.getenv("HF_TOKEN")
-        if hf_token:
-            hf_token = hf_token.strip("'\" \t\r\n")
-            os.environ["HUGGINGFACEHUB_API_TOKEN"] = hf_token
-            try:
-                from langchain_huggingface import HuggingFaceEndpointEmbeddings
-                _embeddings_instance = HuggingFaceEndpointEmbeddings(
-                    model="sentence-transformers/all-MiniLM-L6-v2",
-                    huggingfacehub_api_token=hf_token,
-                )
-            except Exception as e:
-                print(f"Warning: Failed to initialize HuggingFaceEndpointEmbeddings: {e}")
-
-        if _embeddings_instance is None:
-            openai_key = os.getenv("OPENAI_API_KEY")
-            if openai_key:
-                openai_key = openai_key.strip("'\" \t\r\n")
-                try:
-                    from langchain_openai import OpenAIEmbeddings
-                    _embeddings_instance = OpenAIEmbeddings(api_key=openai_key)
-                except Exception as e:
-                    print(f"Warning: Failed to initialize OpenAIEmbeddings: {e}")
-
-        if _embeddings_instance is None:
-            from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-            _embeddings_instance = FastEmbedEmbeddings(
-                model_name="BAAI/bge-small-en-v1.5"
-            )
+        try:
+            import torch
+            torch.set_num_threads(1)
+        except Exception:
+            pass
+        _embeddings_instance = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"batch_size": 16}
+        )
     return _embeddings_instance
 
 class ChatRequest(BaseModel):
