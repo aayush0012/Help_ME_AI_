@@ -8,8 +8,7 @@ __pycache__/
 
 .vscode/
 node_modules/
-chroma_db/
-uploads/
-docs/
 uploads/
 chroma_db/
+backend/test_chroma_*/
+test_chroma_*/

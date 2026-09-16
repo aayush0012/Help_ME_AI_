@@ -1,65 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import TechBackground from "./TechBackground";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import Navbar from "./components/Navbar";
+import FlowchartShowcase from "./components/FlowchartShowcase";
 import "./App.css";
 
-const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? "http://127.0.0.1:8000" : "https://help-me-zdr2.onrender.com");
-
-const renderBold = (text) => {
-  if (!text) return "";
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, index) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
-};
-
-const renderMarkdown = (text) => {
-  if (!text) return null;
-  
-  const cleanedText = text.replace(/\[Source\s+\d+(?:,\s*Source\s+\d+)*\]/gi, "");
-
-  const lines = cleanedText.split("\n");
-  return lines.map((line, idx) => {
-    let content = line;
-    
-    if (content.startsWith("### ")) {
-      return <h4 key={idx} style={{ marginTop: "10px", marginBottom: "6px", fontWeight: "700" }}>{renderBold(content.replace("### ", ""))}</h4>;
-    }
-    if (content.startsWith("## ")) {
-      return <h3 key={idx} style={{ marginTop: "12px", marginBottom: "8px", fontWeight: "700" }}>{renderBold(content.replace("## ", ""))}</h3>;
-    }
-    
-    if (content.trim().startsWith("- ") || content.trim().startsWith("* ")) {
-      const bulletText = content.replace(/^[\s]*[-*]\s+/, "");
-      return (
-        <li key={idx} className="markdown-bullet" style={{ marginLeft: "18px", marginBottom: "4px" }}>
-          {renderBold(bulletText)}
-        </li>
-      );
-    }
-    
-    if (/^\d+\.\s+/.test(content.trim())) {
-      const listText = content.replace(/^[\s]*\d+\.\s+/, "");
-      const numMatch = content.match(/^\s*(\d+)/);
-      const num = numMatch ? numMatch[1] : "1";
-      return (
-        <div key={idx} className="markdown-list-item" style={{ display: "flex", gap: "6px", marginBottom: "4px" }}>
-          <span style={{ fontWeight: "bold" }}>{num}.</span>
-          <span>{renderBold(listText)}</span>
-        </div>
-      );
-    }
-    
-    if (!content.trim()) {
-      return <div key={idx} style={{ height: "6px" }} />;
-    }
-    
-    return <p key={idx} style={{ marginBottom: "6px", lineHeight: "1.4" }}>{renderBold(content)}</p>;
-  });
-};
+const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "https://help-me-zdr2.onrender.com");
 
 const getSessionId = () => {
   let sessionId = sessionStorage.getItem("helpme_session_id");
@@ -67,7 +16,9 @@ const getSessionId = () => {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
       sessionId = crypto.randomUUID();
     } else {
-      sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      sessionId =
+        Math.random().toString(36).substring(2, 15) +
+        Math.random().toString(36).substring(2, 15);
     }
     sessionStorage.setItem("helpme_session_id", sessionId);
   }
@@ -76,75 +27,106 @@ const getSessionId = () => {
 
 function App() {
   const [showLanding, setShowLanding] = useState(true);
-  const [file, setFile] = useState(null);
+  const [activeDocument, setActiveDocument] = useState(null);
+  const [chunksIndexed, setChunksIndexed] = useState(null);
   const [message, setMessage] = useState("");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+  const [selectedFileName, setSelectedFileName] = useState("");
+  const [slideIndex, setSlideIndex] = useState(0);
 
+  const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
+  // Auto-slide circular loop across all 4 slides (Dashboard + 3 process steps)
+  useEffect(() => {
+    if (!showLanding) return;
+    const interval = setInterval(() => {
+      setSlideIndex((prev) => (prev + 1) % 4);
+    }, 1400);
+    return () => clearInterval(interval);
+  }, [showLanding]);
+
+  // Continuous appearing transition on scrolling both up and down repeatedly
+  useEffect(() => {
+    if (!showLanding) return;
+
+    const checkVisibility = () => {
+      const windowHeight = window.innerHeight;
+      const revealElements = document.querySelectorAll(".scroll-reveal");
+
+      revealElements.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        // Visible when within active viewport range (both scrolling down and up)
+        const inView = rect.top < windowHeight - 70 && rect.bottom > 70;
+        if (inView) {
+          el.classList.add("is-visible");
+        } else {
+          el.classList.remove("is-visible");
+        }
+      });
+    };
+
+    // Initial check
+    checkVisibility();
+
+    window.addEventListener("scroll", checkVisibility, { passive: true });
+    window.addEventListener("resize", checkVisibility, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", checkVisibility);
+      window.removeEventListener("resize", checkVisibility);
+    };
+  }, [showLanding]);
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
     if (!showLanding) {
       scrollToBottom();
-    } else {
-      const observerCallback = (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("revealed");
-          } else {
-            entry.target.classList.remove("revealed");
-          }
-        });
-      };
-
-      const observerOptions = {
-        threshold: 0.15,
-        rootMargin: "0px 0px -40px 0px",
-      };
-
-      const observer = new IntersectionObserver(observerCallback, observerOptions);
-      const elements = document.querySelectorAll(".reveal-on-scroll");
-      elements.forEach((el) => observer.observe(el));
-
-      return () => {
-        elements.forEach((el) => observer.unobserve(el));
-        observer.disconnect();
-      };
     }
   }, [messages, thinking, showLanding]);
 
-  const uploadFile = async () => {
-    if (!file) return;
+  const uploadDocument = async (fileToUpload, { openWorkspace = true } = {}) => {
+    if (!fileToUpload) return;
     setUploading(true);
-    setMessage("");
+    setSelectedFileName(fileToUpload.name);
+    setMessage("Extracting passages and indexing hybrid embeddings…");
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToUpload);
 
     try {
       const sessionId = getSessionId();
-      const response = await axios.post(`${API_BASE}/upload?session_id=${sessionId}`, formData);
-      setMessage(response.data.message);
+      const response = await axios.post(
+        `${API_BASE}/upload?session_id=${sessionId}`,
+        formData
+      );
+      setActiveDocument(fileToUpload.name);
+      setChunksIndexed(response.data.chunks_indexed ?? null);
+      setMessages([]);
+      setMessage(`${fileToUpload.name} is ready for queries.`);
+      if (openWorkspace) {
+        setShowLanding(false);
+      }
     } catch (err) {
-      console.log(err);
+      console.error(err);
       const detail = err.response?.data?.detail;
-      setMessage(detail ? `Upload failed: ${detail}` : "Upload Failed");
+      setMessage(detail ? `Upload failed: ${detail}` : "Upload failed. Please check backend connection.");
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   };
 
   const handleSend = async () => {
     if (!input.trim()) return;
-
     const question = input;
+
     setMessages((prev) => [
       ...prev,
       {
@@ -173,7 +155,7 @@ function App() {
         },
       ]);
     } catch (err) {
-      console.log(err);
+      console.error(err);
       setThinking(false);
       const detail = err.response?.data?.detail;
       setMessages((prev) => [
@@ -181,11 +163,62 @@ function App() {
         {
           id: Date.now(),
           sender: "bot",
-          text: detail || "Unable to connect to server.",
+          text: detail || "Unable to connect to server. Please ingest a document first.",
           sources: [],
         },
       ]);
     }
+  };
+
+  const handleQuickPrompt = (promptText) => {
+    if (!activeDocument) {
+      setMessage("Please upload a PDF document before querying.");
+      setShowLanding(false);
+      return;
+    }
+    setShowLanding(false);
+    setInput(promptText);
+    setTimeout(async () => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          sender: "user",
+          text: promptText,
+        },
+      ]);
+      setInput("");
+      setThinking(true);
+      try {
+        const sessionId = getSessionId();
+        const response = await axios.post(
+          `${API_BASE}/chat?question=${encodeURIComponent(promptText)}&session_id=${sessionId}`
+        );
+        setThinking(false);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now(),
+            sender: "bot",
+            text: response.data.answer,
+            sources: response.data.sources || [],
+          },
+        ]);
+      } catch (err) {
+        console.error(err);
+        setThinking(false);
+        const detail = err.response?.data?.detail;
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now(),
+            sender: "bot",
+            text: detail || "Unable to connect to server.",
+            sources: [],
+          },
+        ]);
+      }
+    }, 50);
   };
 
   const handleKeyDown = (e) => {
@@ -197,93 +230,6 @@ function App() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState("research");
-
-  const handleUploadAndRedirect = async (targetFile) => {
-    const fileToUpload = targetFile || file;
-    if (!fileToUpload) return;
-
-    setUploading(true);
-    setMessage("");
-
-    const formData = new FormData();
-    formData.append("file", fileToUpload);
-
-    try {
-      const sessionId = getSessionId();
-      const response = await axios.post(`${API_BASE}/upload?session_id=${sessionId}`, formData);
-      setMessage(response.data.message);
-      setUploading(false);
-      setShowLanding(false);
-    } catch (err) {
-      console.log(err);
-      const detail = err.response?.data?.detail;
-      setMessage(detail ? `Upload failed: ${detail}` : "Upload Failed");
-      setUploading(false);
-    }
-  };
-
-  const useCases = {
-    research: {
-      title: "Academic Research Papers",
-      prompt: "What are the core conclusions and experimental methodology of this study?",
-      description: "Parses complex multi-column academic papers, mathematical formulas, and literature citations with exact page numbers.",
-      tags: ["Multi-column Layouts", "Citations", "Formula Context"]
-    },
-    resume: {
-      title: "Resumes & Essays",
-      prompt: "Summarize key work experience, technical stack, and career progression.",
-      description: "Extracts key qualifications, project highlights, and skill proficiency directly from candidate documents.",
-      tags: ["Skill Mapping", "Career Timeline", "Experience Extraction"]
-    },
-    manual: {
-      title: "Technical Documentation",
-      prompt: "What are the installation prerequisites and API config parameters?",
-      description: "Navigates dense technical manuals, configuration tables, and software guides to retrieve precise parameters.",
-      tags: ["API Specs", "System Prerequisites", "Configuration Tables"]
-    },
-    financial: {
-      title: "Financial Statements & Reports",
-      prompt: "What was the year-over-year revenue growth and net operating margin?",
-      description: "Leverages cloud vision OCR to transcribe structured balance sheets, financial tables, and quarterly audits.",
-      tags: ["Cloud Vision OCR", "Structured Tables", "Financial Metrics"]
-    }
-  };
-
-  const [activeStepModal, setActiveStepModal] = useState(null);
-  const [copiedId, setCopiedId] = useState(null);
-
-  const pipelineDetails = {
-    1: {
-      title: "STEP 1: INGESTION & VISION OCR",
-      badge: "INGESTION",
-      badgeClass: "bg-primary-container",
-      description: "Parses standard PDF documents with PyPDFLoader. If extracted text is minimal (<150 characters), automatically triggers PyMuPDF page rendering and Groq Cloud Vision OCR (llama-3.2-11b-vision-preview) to extract un-selectable scanned text and tables.",
-      techStack: ["PyPDFLoader", "PyMuPDF (fitz)", "Groq Cloud Vision OCR", "Recursive Text Splitter"]
-    },
-    2: {
-      title: "STEP 2: HYBRID VECTOR & BM25 INDEXING",
-      badge: "HYBRID INDEXING",
-      badgeClass: "bg-white",
-      description: "Generates 384-dimensional dense vector embeddings using HuggingFace sentence-transformers/all-MiniLM-L6-v2 stored in Chroma DB. Simultaneously tokenizes document corpus for sparse BM25 (Best Matching 25) lexical term frequency scoring.",
-      techStack: ["HuggingFace Embeddings", "Chroma Vector Database", "BM25Okapi Tokenizer", "SHA-256 Chunk Hashing"]
-    },
-    3: {
-      title: "STEP 3: RECIPROCAL RANK FUSION (RRF)",
-      badge: "RRF ROUTING",
-      badgeClass: "bg-white",
-      description: "Combines dense vector similarity search (top-20) and sparse BM25 term frequency scores (top-20). Ranks retrieved chunks using Reciprocal Rank Fusion formula RRF_score(d) = Σ 1 / (60 + rank_i(d)) to produce the top 5 context chunks.",
-      techStack: ["Reciprocal Rank Fusion", "Dense + Sparse Hybrid Search", "Chroma Similarity Search", "Rank Normalization"]
-    },
-    4: {
-      title: "STEP 4: AGENTIC FACT-CHECK & WEB FALLBACK",
-      badge: "FACT CHECK",
-      badgeClass: "bg-pink",
-      description: "LangGraph state machine evaluates retrieved chunk relevance before generation. After creating the answer, an automated evaluator inspects output line-by-line against context. If ungrounded, triggers DuckDuckGo web search fallback.",
-      techStack: ["LangGraph StateGraph", "Groq Llama-3.3-70B", "Hallucination Fact Grader", "DuckDuckGo Web Search"]
-    }
-  };
-
   const handleCopyText = (text, id) => {
     if (!text) return;
     navigator.clipboard.writeText(text);
@@ -291,583 +237,605 @@ function App() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleQuickPrompt = (promptText) => {
-    setInput(promptText);
-    const fakeEvent = { preventDefault: () => {} };
-    setTimeout(() => {
-      handleSendWithQuery(promptText);
-    }, 50);
-  };
-
-  const handleSendWithQuery = async (customQuery) => {
-    const question = customQuery || input;
-    if (!question.trim()) return;
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        sender: "user",
-        text: question,
-      },
-    ]);
-
-    setInput("");
-    setThinking(true);
-
-    try {
-      const sessionId = getSessionId();
-      const response = await axios.post(
-        `${API_BASE}/chat?question=${encodeURIComponent(question)}&session_id=${sessionId}`
-      );
-      setThinking(false);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          sender: "bot",
-          text: response.data.answer,
-          sources: response.data.sources || [],
-        },
-      ]);
-    } catch (err) {
-      console.log(err);
-      setThinking(false);
-      const detail = err.response?.data?.detail;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          sender: "bot",
-          text: detail || "Unable to connect to server. Ingest a document first.",
-          sources: [],
-        },
-      ]);
-    }
-  };
-
-  if (showLanding) {
-    return (
-      <div className="brutalist-landing-container">
-        <TechBackground />
-        {/* TopNavBar */}
-        <header className="brutalist-header">
-          <div className="brutalist-logo">HELPME AI</div>
-          <nav className="brutalist-nav">
-            <a className="nav-link" href="#pipeline">Pipeline</a>
-            <a className="nav-link" href="#capabilities">Capabilities</a>
-            <a className="nav-link" href="#whyus">Why Us</a>
-            <a className="nav-link" href="#benchmarks">Benchmarks</a>
-          </nav>
-          <button
-            className="brutalist-workspace-btn"
-            onClick={() => setShowLanding(false)}
-          >
-            Open Workspace <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1", fontSize: "18px" }}>arrow_forward</span>
-          </button>
-        </header>
-
-        <main className="brutalist-main">
-          {/* Hero Section */}
-          <section className="brutalist-hero">
-            <h1 className="brutalist-hero-title reveal-on-scroll">INTELLIGENT DOCUMENT SEARCH &amp; VERIFICATION</h1>
-
-            {/* Drop Box */}
-            <div className="brutalist-upload-box reveal-on-scroll delay-1">
-              <label className="brutalist-dropzone-label">
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={(e) => {
-                    const selected = e.target.files[0];
-                    setFile(selected);
-                    setMessage("");
-                    if (selected) {
-                      handleUploadAndRedirect(selected);
-                    }
-                  }}
-                />
-                <span className="material-symbols-outlined brutalist-upload-icon" style={{ fontVariationSettings: "'FILL' 0" }}>upload_file</span>
-                <h2 className="brutalist-upload-title">DROP DOCUMENTS HERE</h2>
-                <p className="brutalist-upload-subtitle">Ingest PDFs, Word files, and raw text. Our engine instantly processes, OCRs, and indexes your data for exact retrieval.</p>
-                <div className="brutalist-btn-wrap">
-                  <span className="brutalist-select-btn">
-                    {uploading ? "Ingesting..." : "Select Files"}
-                  </span>
-                </div>
-              </label>
-              {message && <div className="brutalist-notification">{message}</div>}
-            </div>
-          </section>
-
-          {/* Pipeline Section */}
-          <section id="pipeline" className="brutalist-section">
-            <h2 className="brutalist-section-title reveal-on-scroll">THE RETRIEVAL PIPELINE</h2>
-            <div className="brutalist-pipeline-wrapper">
-              <div className="brutalist-pipeline-line"></div>
-
-              {/* Step 1 */}
-              <div
-                className="brutalist-step-card border-primary reveal-on-scroll delay-1 clickable-card"
-                onClick={() => setActiveStepModal(1)}
-                title="Click for Step 1 Technical Details"
-              >
-                <div className="brutalist-step-num bg-primary-container">1</div>
-                <span className="material-symbols-outlined step-icon text-primary-container" style={{ fontVariationSettings: "'FILL' 1" }}>cloud_upload</span>
-                <h3 className="brutalist-step-heading">INGESTION</h3>
-                <p className="brutalist-step-desc">Parallel processing &amp; OCR extraction.</p>
-              </div>
-
-              {/* Step 2 */}
-              <div
-                className="brutalist-step-card border-black reveal-on-scroll delay-2 clickable-card"
-                onClick={() => setActiveStepModal(2)}
-                title="Click for Step 2 Technical Details"
-              >
-                <div className="brutalist-step-num bg-white">2</div>
-                <span className="material-symbols-outlined step-icon text-white" style={{ fontVariationSettings: "'FILL' 1" }}>schema</span>
-                <h3 className="brutalist-step-heading">HYBRID INDEXING</h3>
-                <p className="brutalist-step-desc">Dense vectors + BM25 keyword matching.</p>
-              </div>
-
-              {/* Step 3 */}
-              <div
-                className="brutalist-step-card border-black reveal-on-scroll delay-3 clickable-card"
-                onClick={() => setActiveStepModal(3)}
-                title="Click for Step 3 Technical Details"
-              >
-                <div className="brutalist-step-num bg-white">3</div>
-                <span className="material-symbols-outlined step-icon text-white" style={{ fontVariationSettings: "'FILL' 1" }}>alt_route</span>
-                <h3 className="brutalist-step-heading">RRF ROUTING</h3>
-                <p className="brutalist-step-desc">Reciprocal Rank Fusion optimization.</p>
-              </div>
-
-              {/* Step 4 */}
-              <div
-                className="brutalist-step-card border-pink reveal-on-scroll delay-4 clickable-card"
-                onClick={() => setActiveStepModal(4)}
-                title="Click for Step 4 Technical Details"
-              >
-                <div className="brutalist-step-num bg-pink">4</div>
-                <span className="material-symbols-outlined step-icon text-pink" style={{ fontVariationSettings: "'FILL' 1" }}>verified_user</span>
-                <h3 className="brutalist-step-heading">FACT CHECK</h3>
-                <p className="brutalist-step-desc">Agentic verification against source chunks.</p>
-              </div>
-            </div>
-          </section>
-
-          {/* Capabilities Section */}
-          <section id="capabilities" className="brutalist-section">
-            <h2 className="brutalist-section-title-left reveal-on-scroll">CORE CAPABILITIES</h2>
-            <div className="brutalist-capabilities-grid">
-              {/* Feature 1 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-1">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-secondary">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>format_quote</span>
-                  </div>
-                  <h3>EXACT SOURCE CITATIONS</h3>
-                </div>
-                <p>Every claim generated by the model is backed by a direct, verifiable link to the exact chunk of text in your uploaded documents.</p>
-              </div>
-
-              {/* Feature 2 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-2">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-primary">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>document_scanner</span>
-                  </div>
-                  <h3>CLOUD VISION OCR</h3>
-                </div>
-                <p>Extract text from scanned PDFs and images with high precision, making even legacy documents fully searchable and retrievable.</p>
-              </div>
-
-              {/* Feature 3 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-3">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-tertiary">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>join_inner</span>
-                  </div>
-                  <h3>HYBRID RETRIEVAL</h3>
-                </div>
-                <p>Combines semantic vector search for context with traditional keyword matching (BM25) to ensure nothing is missed.</p>
-              </div>
-
-              {/* Feature 4 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-4">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-pink">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>robot_2</span>
-                  </div>
-                  <h3>FACT VERIFICATION AGENT</h3>
-                </div>
-                <p>A secondary LLM pass actively checks the initial response against the retrieved context to hallucination-proof the final output.</p>
-              </div>
-            </div>
-          </section>
-
-          {/* Benchmarks Section */}
-          <section id="benchmarks" className="brutalist-section">
-            <h2 className="brutalist-section-title reveal-on-scroll">SYSTEM BENCHMARKS</h2>
-            <div className="brutalist-benchmark-grid">
-              {/* Stat 1 */}
-              <div className="benchmark-stat-card border-pink reveal-on-scroll delay-1">
-                <div className="stat-number text-pink">HIGH</div>
-                <div className="stat-label">ACCURACY &amp; FACT CHECK</div>
-                <p className="stat-desc">LangGraph agent eliminates hallucinations by verifying answers line-by-line against source documents.</p>
-              </div>
-
-              {/* Stat 2 */}
-              <div className="benchmark-stat-card border-primary reveal-on-scroll delay-2">
-                <div className="stat-number text-primary-container">BETTER</div>
-                <div className="stat-label">CONTEXT RECALL</div>
-                <p className="stat-desc">Hybrid BM25 keyword matching and vector embeddings deliver superior document search results.</p>
-              </div>
-
-              {/* Stat 3 */}
-              <div className="benchmark-stat-card border-black reveal-on-scroll delay-3">
-                <div className="stat-number text-white">ACCURATE</div>
-                <div className="stat-label">VISION OCR</div>
-                <p className="stat-desc">Extracts text and complex structured tables from scanned PDFs and image documents with precision.</p>
-              </div>
-
-              {/* Stat 4 */}
-              <div className="benchmark-stat-card border-black reveal-on-scroll delay-4">
-                <div className="stat-number text-white">FAST</div>
-                <div className="stat-label">QUERY RESPONSE</div>
-                <p className="stat-desc">Ultra-fast multi-node agent processing powered by Groq cloud inference engine.</p>
-              </div>
-            </div>
-
-            {/* Comparison Table */}
-            <div className="brutalist-comparison-wrapper reveal-on-scroll delay-2">
-              <h3 className="comparison-table-title">Standard AI vs. HelpMe AI</h3>
-              <div className="table-responsive">
-                <table className="brutalist-comparison-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: "30%" }}>Feature</th>
-                      <th style={{ width: "35%" }}>Standard AI</th>
-                      <th style={{ width: "35%" }} className="highlight-header">HELPME AI</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td><strong>Fact Checking</strong></td>
-                      <td><span className="status-text text-fail">❌ Hallucinates</span></td>
-                      <td className="highlight-cell"><span className="status-text text-pass">✓ 100% Fact-Checked</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>Scanned PDFs</strong></td>
-                      <td><span className="status-text text-fail">❌ Cannot Read</span></td>
-                      <td className="highlight-cell"><span className="status-text text-pass">✓ Cloud Vision OCR</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>Search Precision</strong></td>
-                      <td><span className="status-text text-warn">⚠️ Basic Search</span></td>
-                      <td className="highlight-cell"><span className="status-text text-pass">✓ Hybrid Precision</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>Page Proof</strong></td>
-                      <td><span className="status-text text-fail">❌ None</span></td>
-                      <td className="highlight-cell"><span className="status-text text-pass">✓ Direct Page Links</span></td>
-                    </tr>
-                    <tr>
-                      <td><strong>Missing Data</strong></td>
-                      <td><span className="status-text text-fail">❌ Guesses Facts</span></td>
-                      <td className="highlight-cell"><span className="status-text text-pass">✓ Live Web Search</span></td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </section>
-
-          {/* Why Choose Us Section */}
-          <section id="whyus" className="brutalist-section">
-            <h2 className="brutalist-section-title-left reveal-on-scroll">WHY CHOOSE HELPME AI?</h2>
-            <div className="brutalist-capabilities-grid">
-              {/* Reason 1 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-1">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-secondary">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
-                  </div>
-                  <h3>ZERO HALLUCINATIONS</h3>
-                </div>
-                <p>Unlike standard AI models that invent answers, our built-in fact checker verifies every line of context before showing results.</p>
-              </div>
-
-              {/* Reason 2 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-2">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-primary">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>visibility</span>
-                  </div>
-                  <h3>SCANNED PDF OCR</h3>
-                </div>
-                <p>Effortlessly processes image-only scanned PDFs, financial balance sheets, and handwritten notes using Cloud Vision OCR.</p>
-              </div>
-
-              {/* Reason 3 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-3">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-tertiary">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>center_focus_strong</span>
-                  </div>
-                  <h3>HYBRID RETRIEVAL</h3>
-                </div>
-                <p>Combines semantic vector understanding with exact word matching so you find specific page numbers and figures instantly.</p>
-              </div>
-
-              {/* Reason 4 */}
-              <div className="brutalist-cap-card reveal-on-scroll delay-4">
-                <div className="cap-card-header">
-                  <div className="cap-badge bg-pink">
-                    <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>travel_explore</span>
-                  </div>
-                  <h3>SMART WEB FALLBACK</h3>
-                </div>
-                <p>If an answer isn't present in your uploaded document, our agent automatically retrieves verified facts from live web search.</p>
-              </div>
-            </div>
-          </section>
-        </main>
-
-        {/* Pipeline Details Modal */}
-        {activeStepModal && pipelineDetails[activeStepModal] && (
-          <div className="brutalist-modal-overlay" onClick={() => setActiveStepModal(null)}>
-            <div className="brutalist-modal-content" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h2>{pipelineDetails[activeStepModal].title}</h2>
-                <button className="modal-close-btn" onClick={() => setActiveStepModal(null)}>&times;</button>
-              </div>
-              <p className="modal-description">{pipelineDetails[activeStepModal].description}</p>
-              <div className="modal-tech-stack">
-                <span className="tech-stack-label">ARCHITECTURE COMPONENTS:</span>
-                <div className="tech-tags">
-                  {pipelineDetails[activeStepModal].techStack.map((tech, idx) => (
-                    <span key={idx} className="tech-tag">{tech}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Minimal Clean Footer */}
-        <footer className="minimal-footer">
-          <div className="minimal-footer-container">
-            <div className="minimal-footer-left">
-              <span className="minimal-logo">HELPME AI</span>
-              <span className="minimal-copy">© 2026 HELPME AI. All rights reserved.</span>
-            </div>
-            <nav className="minimal-footer-nav">
-              <a href="#pipeline">Pipeline</a>
-              <a href="#capabilities">Capabilities</a>
-              <a href="#whyus">Why Us</a>
-              <a href="#benchmarks">Benchmarks</a>
-            </nav>
-          </div>
-        </footer>
-      </div>
-    );
-  }
-
   return (
-    <div className="app-container animate-fade-in alpha-workspace">
-      {/* Cyber-Brutalist Sidebar */}
-      <aside className="alpha-sidebar">
-        <div className="alpha-brand-header">
-          <div className="brand-title-row">
-            <span className="material-symbols-outlined brand-rocket">psychology</span>
-            <div>
-              <h1 className="alpha-brand-title">HELPME AI</h1>
-            </div>
-          </div>
-        </div>
+    <div
+      className="site-root"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = e.dataTransfer?.files?.[0];
+        if (file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"))) {
+          uploadDocument(file, { openWorkspace: true });
+        }
+      }}
+    >
+      {/* Top Navbar */}
+      <Navbar
+        showLanding={showLanding}
+        setShowLanding={setShowLanding}
+        activeDocument={activeDocument}
+        onOpenWorkspace={() => setShowLanding(false)}
+      />
 
-        {/* Sidebar Nav Items */}
-        <nav className="alpha-nav">
-          <button className="alpha-nav-item active">
-            <span className="material-symbols-outlined">database</span>
-            <span>KNOWLEDGE BASE</span>
-          </button>
-          <button className="alpha-nav-item" onClick={() => setShowLanding(true)}>
-            <span className="material-symbols-outlined">home</span>
-            <span>LANDING PAGE</span>
-          </button>
-        </nav>
+      {showLanding ? (
+        <div className="landing-layout animate-fade-in">
+          {/* Hero Section */}
+          <section className="editorial-hero-section">
+            <div className="editorial-hero-container">
+              {/* Left Column: Headline with Italics, Subtitle, Action Card (Sample Questions Removed) */}
+              <div className="hero-left-col">
+                <h1 className="hero-editorial-headline">
+                  <em>THE INTELLIGENT AI RETRIEVAL PIPELINE</em>
+                </h1>
+                <p className="hero-editorial-subtitle">
+                  Zero Hallucinations. Exact Source Citations. Fact Verification.
+                </p>
 
-        {/* Data Source Ingestion Card */}
-        <div className="alpha-data-card">
-          <h2 className="data-card-title">DATA SOURCE</h2>
-          <p className="data-card-desc">
-            Upload PDFs to build a hybrid vector + BM25 search index.
-          </p>
-          <label className="alpha-ingest-btn">
-            <input
-              type="file"
-              accept="application/pdf"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const selected = e.target.files[0];
-                if (selected) {
-                  setFile(selected);
-                  uploadFile();
-                }
-              }}
-            />
-            <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>upload</span>
-            <span>{uploading ? "INGESTING..." : "INGEST NEW DATA"}</span>
-          </label>
-          {file && (
-            <span className="ingested-file-tag">📄 {file.name}</span>
-          )}
-        </div>
+                {/* Main Workspace Action / Ingestion Bar at the Top */}
+                <div className="hero-input-action-card">
+                  <div className="hero-input-row">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      accept="application/pdf"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) uploadDocument(file, { openWorkspace: true });
+                      }}
+                    />
+                    <div
+                      className="hero-pseudo-input"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <span className="material-symbols-outlined input-icon">attach_file</span>
+                      <span className="pseudo-placeholder">
+                        {uploading
+                          ? "Uploading and indexing document..."
+                          : selectedFileName
+                          ? selectedFileName
+                          : "Select or drop any PDF document to begin..."}
+                      </span>
+                    </div>
 
-        {/* Bottom Sidebar Footer */}
-        <div className="alpha-sidebar-bottom">
-          <button className="alpha-bottom-link home-link" onClick={() => setShowLanding(true)}>
-            <span className="material-symbols-outlined">arrow_back</span>
-            <span>BACK TO HOME</span>
-          </button>
-        </div>
-
-        {message && (
-          <div className="notification-banner alpha-toast">
-            {message}
-          </div>
-        )}
-      </aside>
-
-      {/* Main Workspace Area */}
-      <main className="alpha-main-content">
-        <div className="alpha-chat-window">
-          {messages.length === 0 && !thinking && (
-            <div className="alpha-welcome">
-              <div className="welcome-tag">KNOWLEDGE BASE READY</div>
-              <h2>Ask Anything Against Your Retrieval Corpus</h2>
-              <p>
-                Upload PDFs using the sidebar button or click a starter prompt below:
-              </p>
-              <div className="quick-prompts-row">
-                <button className="quick-prompt-chip" onClick={() => handleQuickPrompt("Summarize the key points and core takeaways of this document.")}>
-                  💡 Summarize Key Points
-                </button>
-                <button className="quick-prompt-chip" onClick={() => handleQuickPrompt("Extract all key data points, figures, and structured specifications.")}>
-                  📊 Extract Data &amp; Specifications
-                </button>
-                <button className="quick-prompt-chip" onClick={() => handleQuickPrompt("What are the main conclusions and core findings?")}>
-                  ❓ Main Conclusions
-                </button>
-              </div>
-            </div>
-          )}
-
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`alpha-chat-row ${
-                msg.sender === "user" ? "alpha-user-row" : "alpha-bot-row"
-              }`}
-            >
-              {msg.sender === "user" ? (
-                <div className="alpha-user-card">
-                  <div className="alpha-user-badge">
-                    <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>person</span>
-                    <span>USER QUERY</span>
-                  </div>
-                  <div className="alpha-user-text">{msg.text}</div>
-                </div>
-              ) : (
-                <div className="alpha-bot-card">
-                  <div className="alpha-bot-badge">
-                    <span className="material-symbols-outlined" style={{ fontSize: "14px" }}>memory</span>
-                    <span>HELPME AI</span>
-                  </div>
-                  <div className="alpha-bot-text">{renderMarkdown(msg.text)}</div>
-                  
-                  {/* Sources Row */}
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div className="alpha-sources-row">
-                      <span className="sources-label">SOURCES:</span>
-                      {msg.sources.map((src, idx) => {
-                        if (src.pages === "web") {
-                          return (
-                            <a
-                              key={idx}
-                              href={src.source}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="alpha-src-pill web-pill"
-                            >
-                              🔗 {src.title || "Web Source"}
-                            </a>
-                          );
+                    <button
+                      type="button"
+                      className="hero-submit-btn"
+                      onClick={() => {
+                        if (fileInputRef.current) {
+                          fileInputRef.current.click();
+                        } else {
+                          setShowLanding(false);
                         }
-                        return (
-                          <span key={idx} className="alpha-src-pill doc-pill">
-                            📄 {src.source || "Document"} [Pg {src.pages}]
-                          </span>
-                        );
-                      })}
+                      }}
+                    >
+                      <span>{uploading ? "Indexing..." : "Start for free"}</span>
+                    </button>
+                  </div>
+
+                  {uploading && (
+                    <div className="hero-upload-status">
+                      <span className="status-spinner"></span>
+                      <span>Processing multi-page document with PyMuPDF &amp; Vision OCR...</span>
                     </div>
                   )}
 
-                  <button
-                    className="copy-answer-btn alpha-copy-btn"
-                    onClick={() => handleCopyText(msg.text, msg.id)}
-                  >
-                    {copiedId === msg.id ? "✓ Copied" : "Copy"}
-                  </button>
+                  {message && !uploading && (
+                    <div className={`hero-upload-status ${message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "error" : "ready"}`}>
+                      <span className="material-symbols-outlined">
+                        {message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "error" : "check_circle"}
+                      </span>
+                      <span>{message}</span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
 
-          {thinking && (
-            <div className="alpha-chat-row alpha-bot-row">
-              <div className="alpha-thinking-bar">
-                <span className="thinking-block"></span>
-                <span className="thinking-block"></span>
-                <span className="thinking-block"></span>
-                <span className="thinking-label">SYNTHESIZING CONTEXT...</span>
+                <p className="hero-editorial-caption">
+                  <span className="stop-guessing-cursive">Stop guessing.</span> Use the HelpMe AI hybrid search to find precise answers with direct citations, even from scanned PDFs.
+                </p>
+              </div>
+
+              {/* Right Column: Perspective Dashboard Graphic */}
+              <div className="hero-right-col">
+                <div className="hero-perspective-wrap">
+                  <div className="mock-dashboard-card">
+                    {/* Dashboard Top Header - Badge Completely Removed */}
+                    <div className="dashboard-card-topbar">
+                      <div className="dash-window-dots">
+                        <span className="dot d1"></span>
+                        <span className="dot d2"></span>
+                        <span className="dot d3"></span>
+                      </div>
+                      <div className="dash-tabs">
+                        <button
+                          type="button"
+                          className={`dash-tab ${slideIndex === 0 ? "active" : ""}`}
+                          onClick={() => setSlideIndex(0)}
+                        >
+                          Dashboard
+                        </button>
+                        <button
+                          type="button"
+                          className={`dash-tab ${slideIndex === 1 ? "active" : ""}`}
+                          onClick={() => setSlideIndex(1)}
+                        >
+                          01 Upload
+                        </button>
+                        <button
+                          type="button"
+                          className={`dash-tab ${slideIndex === 2 ? "active" : ""}`}
+                          onClick={() => setSlideIndex(2)}
+                        >
+                          02 Ask Query
+                        </button>
+                        <button
+                          type="button"
+                          className={`dash-tab ${slideIndex === 3 ? "active" : ""}`}
+                          onClick={() => setSlideIndex(3)}
+                        >
+                          03 Answer
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Auto-Slide Carousel Content Area */}
+                    <div className="dash-slides-container">
+                      {slideIndex === 0 && (
+                        <div className="dash-slide animate-fade-in" key="slide-0">
+                          {/* Minimal Line Chart Mockup */}
+                          <div className="dashboard-chart-strip">
+                            <div className="chart-header">
+                              <span className="chart-title">Retrieval &amp; Relevance Ranking</span>
+                              <span className="chart-stat">Active</span>
+                            </div>
+                            <div className="mock-line-chart">
+                              <div className="chart-bars">
+                                <span style={{ height: "35%" }}></span>
+                                <span style={{ height: "60%" }}></span>
+                                <span style={{ height: "45%" }}></span>
+                                <span style={{ height: "75%" }}></span>
+                                <span style={{ height: "90%" }}></span>
+                                <span style={{ height: "65%" }}></span>
+                                <span style={{ height: "80%" }}></span>
+                                <span style={{ height: "88%" }}></span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Embedded Flowchart */}
+                          <div className="dashboard-flowchart-box">
+                            <div className="df-title">RETRIEVAL PIPELINE FLOW</div>
+                            <div className="df-flow-row">
+                              <div className="df-node">
+                                <span className="material-symbols-outlined df-icon">description</span>
+                                <span className="df-label">Ingestion</span>
+                                <span className="df-sub">PyMuPDF / OCR</span>
+                              </div>
+                              <span className="df-arrow">→</span>
+                              <div className="df-node">
+                                <span className="material-symbols-outlined df-icon">hub</span>
+                                <span className="df-label">Embeddings</span>
+                                <span className="df-sub">ChromaDB</span>
+                              </div>
+                              <span className="df-arrow">→</span>
+                              <div className="df-node">
+                                <span className="material-symbols-outlined df-icon">manage_search</span>
+                                <span className="df-label">Retrieval</span>
+                                <span className="df-sub">Dense + BM25</span>
+                              </div>
+                              <span className="df-arrow">→</span>
+                              <div className="df-node">
+                                <span className="material-symbols-outlined df-icon">verified_user</span>
+                                <span className="df-label">Verification</span>
+                                <span className="df-sub">Exact Citations</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {slideIndex === 1 && (
+                        <div className="dash-slide animate-fade-in" key="slide-1">
+                          <div className="slide-header-strip">
+                            <span className="slide-step-tag">STEP 01</span>
+                            <strong className="slide-main-title">Upload Study Document</strong>
+                          </div>
+                          <div className="slide-card-visual">
+                            <div className="slide-doc-box">
+                              <span className="material-symbols-outlined slide-file-icon">description</span>
+                              <div className="slide-doc-details">
+                                <strong>Textbook_Chapter_04.pdf</strong>
+                                <span>34 Pages • Text, formulas, and diagrams extracted</span>
+                              </div>
+                            </div>
+                            <div className="slide-passages-list">
+                              <div className="slide-passage-pill">Passage #01 [Pg 1] • Overview</div>
+                              <div className="slide-passage-pill">Passage #02 [Pg 2] • Core Concepts</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {slideIndex === 2 && (
+                        <div className="dash-slide animate-fade-in" key="slide-2">
+                          <div className="slide-header-strip">
+                            <span className="slide-step-tag">STEP 02</span>
+                            <strong className="slide-main-title">Ask Any Question</strong>
+                          </div>
+                          <div className="slide-card-visual">
+                            <div className="slide-query-box">
+                              <span className="material-symbols-outlined slide-query-icon">help_outline</span>
+                              <div className="slide-query-details">
+                                <span className="slide-query-label">STUDENT QUESTION</span>
+                                <p className="slide-query-text">
+                                  "What are the main stages of cellular respiration and where do they occur?"
+                                </p>
+                              </div>
+                            </div>
+                            <div className="slide-search-dual">
+                              <span className="slide-engine-pill">Semantic Vectors</span>
+                              <span className="slide-engine-pill">Keyword Search</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {slideIndex === 3 && (
+                        <div className="dash-slide animate-fade-in" key="slide-3">
+                          <div className="slide-header-strip">
+                            <span className="slide-step-tag">STEP 03</span>
+                            <strong className="slide-main-title">Get Grounded Answers</strong>
+                          </div>
+                          <div className="slide-card-visual">
+                            <div className="slide-answer-box">
+                              <div className="slide-answer-top">
+                                <span className="material-symbols-outlined answer-check">check_circle</span>
+                                <span>VERIFIED ANSWER</span>
+                              </div>
+                              <p className="slide-answer-text">
+                                1. <strong>Glycolysis</strong> in the cytoplasm, 2. <strong>Krebs Cycle</strong> in mitochondrial matrix, and 3. <strong>Electron Transport Chain</strong> on inner membrane.
+                              </p>
+                              <div className="slide-citations-row">
+                                <span className="slide-citation-tag">📄 Textbook_Chapter_04.pdf [Pg 14]</span>
+                                <span className="slide-citation-tag">📄 Textbook_Chapter_04.pdf [Pg 18]</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Circular Loop Carousel Controls */}
+                  <div className="dashboard-carousel-controls">
+                    <button
+                      type="button"
+                      className="carousel-arrow-btn"
+                      onClick={() => setSlideIndex((prev) => (prev - 1 + 4) % 4)}
+                      aria-label="Previous slide"
+                    >
+                      ‹
+                    </button>
+                    {[0, 1, 2, 3].map((idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className={`carousel-dot-btn ${slideIndex === idx ? "active" : ""}`}
+                        onClick={() => setSlideIndex(idx)}
+                        aria-label={`Go to slide ${idx + 1}`}
+                      />
+                    ))}
+                    <button
+                      type="button"
+                      className="carousel-arrow-btn"
+                      onClick={() => setSlideIndex((prev) => (prev + 1) % 4)}
+                      aria-label="Next slide"
+                    >
+                      ›
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-          )}
+          </section>
 
-          <div ref={messagesEndRef}></div>
+          {/* Linear Pipeline (Ingestion, Embeddings, Retrieval, Verification), Capabilities & Benchmarks */}
+          <FlowchartShowcase onLaunchWorkspace={() => setShowLanding(false)} />
+
+          {/* Why Us Section */}
+          <section id="why-us" className="editorial-whyus-section scroll-reveal">
+            <div className="editorial-container">
+              <div className="whyus-card">
+                <div className="whyus-text">
+                  <h3 className="whyus-title">Built for Accurate Study &amp; Research</h3>
+                  <p className="whyus-desc">
+                    Get accurate, verified answers and exact page citations directly from your textbooks, lecture slides, and study notes with zero hallucinations.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="whyus-btn"
+                  onClick={() => setShowLanding(false)}
+                >
+                  Launch Workspace Now →
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* Footer */}
+          <footer className="editorial-footer">
+            <div className="editorial-container footer-flex">
+              <span className="footer-brand">HELPME AI</span>
+              <nav className="footer-nav">
+                <a href="#pipeline">Pipeline</a>
+                <a href="#capabilities">Capabilities</a>
+                <a href="#benchmarks">Benchmarks</a>
+                <a href="#why-us">Why Us</a>
+              </nav>
+            </div>
+          </footer>
         </div>
+      ) : (
+        /* Soothing, Clean Chat Workspace View */
+        <div className="editorial-workspace-layout animate-fade-in">
+          {/* Workspace Left Sidebar */}
+          <aside className="workspace-clean-sidebar">
+            <div className="clean-sidebar-top">
+              <button
+                type="button"
+                className="clean-new-chat-btn"
+                onClick={() => setMessages([])}
+                disabled={messages.length === 0}
+              >
+                <span className="material-symbols-outlined">add</span>
+                <span>New Session</span>
+              </button>
 
-        {/* Bottom Input Dock */}
-        <div className="alpha-bottom-dock">
-          <div className="alpha-mode-chips">
-            <span className="mode-chip highlight-chip">⚡ Hybrid Search RAG</span>
-            <span className="mode-chip">🛡️ Hallucination Filter</span>
-          </div>
+              <div className="clean-sidebar-section">
+                <span className="sidebar-heading">STUDY MATERIAL</span>
+                {activeDocument ? (
+                  <div className="sidebar-doc-item">
+                    <span className="material-symbols-outlined doc-icon">description</span>
+                    <div className="doc-meta">
+                      <strong title={activeDocument}>{activeDocument}</strong>
+                      <span>{chunksIndexed ? `${chunksIndexed} passages indexed` : "Ready"}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="sidebar-doc-empty">
+                    <span>No document selected</span>
+                    <button
+                      type="button"
+                      className="sidebar-upload-trigger"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Choose PDF
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
 
-          <div className="alpha-input-container">
-            <input
-              className="alpha-chat-input"
-              type="text"
-              placeholder="Ask any question about your document..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={thinking}
-            />
-            <button
-              className="alpha-send-btn"
-              onClick={handleSend}
-              disabled={!input.trim() || thinking}
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: "16px" }}>send</span>
-              <span>SEND</span>
-            </button>
-          </div>
+            <div className="clean-sidebar-bottom">
+              <button
+                type="button"
+                className="sidebar-overview-btn"
+                onClick={() => setShowLanding(true)}
+              >
+                <span className="material-symbols-outlined">arrow_back</span>
+                <span>Back to Overview</span>
+              </button>
+            </div>
+          </aside>
+
+          {/* Main Chat Content Area */}
+          <main className="workspace-clean-main">
+            <header className="clean-workspace-header">
+              <div className="clean-header-breadcrumb">
+                <span className="crumb-light">Workspace</span>
+                <span className="crumb-slash">/</span>
+                <span className="crumb-dark">{activeDocument || "Study Notes"}</span>
+              </div>
+            </header>
+
+            {uploading && (
+              <div className="workspace-upload-status">
+                <span className="status-spinner"></span>
+                <span>Processing multi-page document with PyMuPDF &amp; Vision OCR...</span>
+              </div>
+            )}
+
+            {message && !uploading && (
+              <div className={`workspace-upload-status ${message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "error" : "ready"}`}>
+                <span className="material-symbols-outlined">
+                  {message.toLowerCase().includes("fail") || message.toLowerCase().includes("error") ? "error" : "check_circle"}
+                </span>
+                <span>{message}</span>
+              </div>
+            )}
+
+            {/* Chat Messages */}
+            <div className="clean-chat-scroll">
+              {messages.length === 0 && !thinking && (
+                <div className="clean-empty-hero">
+                  <h2>
+                    {activeDocument
+                      ? `Ready to study ${activeDocument}`
+                      : "Upload your study material"}
+                  </h2>
+                  <p>
+                    {activeDocument
+                      ? "Ask questions, generate practice questions, or get key concepts explained with exact page references."
+                      : "Upload your textbook chapter, lecture slides, or reading material to start studying."}
+                  </p>
+
+                  {!activeDocument && (
+                    <label className="clean-upload-btn">
+                      <input
+                        type="file"
+                        accept="application/pdf"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) uploadDocument(file, { openWorkspace: false });
+                        }}
+                      />
+                      <span className="material-symbols-outlined">upload_file</span>
+                      <span>Select PDF Document</span>
+                    </label>
+                  )}
+
+                  <div className="clean-sample-chips">
+                    <button
+                      type="button"
+                      className="clean-chip"
+                      onClick={() => handleQuickPrompt("Summarize this document into clear exam revision notes with key points.")}
+                    >
+                      📝 Summarize into Exam Notes
+                    </button>
+                    <button
+                      type="button"
+                      className="clean-chip"
+                      onClick={() => handleQuickPrompt("Generate 5 practice quiz questions based on this document with answers.")}
+                    >
+                      ❓ Create Practice Quiz (5 Questions)
+                    </button>
+                    <button
+                      type="button"
+                      className="clean-chip"
+                      onClick={() => handleQuickPrompt("Explain the most important and difficult concept here in simple words.")}
+                    >
+                      💡 Explain Concept in Simple Words
+                    </button>
+                    <button
+                      type="button"
+                      className="clean-chip"
+                      onClick={() => handleQuickPrompt("List all important definitions, formulas, and key terms with page references.")}
+                    >
+                      📌 Key Definitions &amp; Formulas
+                    </button>
+                    <button
+                      type="button"
+                      className="clean-chip"
+                      onClick={() => handleQuickPrompt("What are the most likely exam questions that can be asked from this chapter?")}
+                    >
+                      🎯 Probable Exam Questions
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Messages Flow */}
+              {messages.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`clean-message-row ${msg.sender === "user" ? "user" : "bot"}`}
+                >
+                  {msg.sender === "user" ? (
+                    <div className="clean-user-bubble">
+                      <div className="bubble-tag">YOU</div>
+                      <div className="bubble-text">{msg.text}</div>
+                    </div>
+                  ) : (
+                    <div className="clean-bot-card">
+                      <div className="bot-card-top">
+                        <span className="bot-tag">HELPME AI • VERIFIED ANSWER</span>
+                      </div>
+                      <div className="bot-markdown">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.text ? msg.text.replace(/\[Source\s+\d+(?:,\s*Source\s+\d+)*\]/gi, "") : ""}
+                        </ReactMarkdown>
+                      </div>
+
+                      {/* Source Citations */}
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div className="clean-citations-box">
+                          <span className="citations-title">VERIFIED CITATIONS:</span>
+                          <div className="citations-list">
+                            {msg.sources.map((src, idx) => (
+                              <span key={idx} className="clean-citation-pill">
+                                📄 {src.source || "Document"} [Pg {src.pages}]
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="bot-card-actions">
+                        <button
+                          type="button"
+                          className="clean-copy-btn"
+                          onClick={() => handleCopyText(msg.text, msg.id)}
+                        >
+                          <span className="material-symbols-outlined">
+                            {copiedId === msg.id ? "check" : "content_copy"}
+                          </span>
+                          <span>{copiedId === msg.id ? "Copied" : "Copy Answer"}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* Thinking */}
+              {thinking && (
+                <div className="clean-message-row bot">
+                  <div className="clean-thinking-box">
+                    <span className="thinking-spinner"></span>
+                    <span>Retrieving hybrid passages &amp; verifying facts...</span>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef}></div>
+            </div>
+
+            {/* Bottom Input Dock */}
+            <div className="clean-input-dock">
+              <div className="clean-input-container">
+                <label className="clean-attach-icon" title="Upload new document">
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadDocument(file, { openWorkspace: false });
+                    }}
+                  />
+                  <span className="material-symbols-outlined">attach_file</span>
+                </label>
+
+                <input
+                  type="text"
+                  className="clean-text-input"
+                  placeholder={
+                    activeDocument
+                      ? `Ask any question about ${activeDocument}...`
+                      : "Upload textbook or notes to ask questions..."
+                  }
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  disabled={!activeDocument || thinking}
+                  aria-label="Ask question about document"
+                />
+
+                <button
+                  type="button"
+                  className="clean-send-btn"
+                  onClick={handleSend}
+                  disabled={!activeDocument || !input.trim() || thinking}
+                >
+                  <span className="material-symbols-outlined">arrow_upward</span>
+                </button>
+              </div>
+            </div>
+          </main>
         </div>
-      </main>
+      )}
     </div>
   );
 }

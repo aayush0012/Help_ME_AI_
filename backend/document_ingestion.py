@@ -1,31 +1,80 @@
 import os
 import hashlib
 import time
+import base64
+import concurrent.futures
 from dotenv import load_dotenv
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 import pymupdf
-import base64
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 
-load_dotenv()
+base_dir = os.path.dirname(os.path.abspath(__file__))
+env_file = os.path.join(base_dir, ".env")
+if os.path.exists(env_file):
+    load_dotenv(dotenv_path=env_file)
+else:
+    load_dotenv()
 
 chunk_size_val = 1000
 chunk_overlap_val = 200
 
-def run_cloud_ocr(file_path):
-    print("Opening PDF with PyMuPDF for cloud transcription...")
+def _process_single_page_ocr(vision_llm, file_path, page_num, total_pages):
+    num = page_num + 1
+    print(f"Running OCR transcription on page {num}/{total_pages}...")
     try:
-        doc = pymupdf.open(file_path)
+        # Open separate doc handle per thread for thread safety
+        with pymupdf.open(file_path) as doc:
+            page = doc[page_num]
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+
+        base64_image = base64.b64encode(img_bytes).decode("utf-8")
+
+        message = HumanMessage(
+            content=[
+                {
+                    "type": "text", 
+                    "text": (
+                        "Transcribe all academic text, headings, mathematical formulas (format in LaTeX $...$ or $$...$$), "
+                        "and tables from this page image. Output only the clean transcribed text without conversational commentary."
+                    )
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64," + base64_image
+                    }
+                }
+            ]
+        )
+
+        response = vision_llm.invoke([message])
+        transcribed_text = response.content.strip()
+
+        if transcribed_text:
+            return Document(
+                page_content=transcribed_text,
+                metadata={
+                    "source": os.path.basename(file_path),
+                    "page": page_num
+                }
+            )
     except Exception as e:
-        print(e)
+        print(f"OCR error on page {num}: {e}")
+    return None
+
+def run_cloud_ocr(file_path):
+    print("Opening PDF with PyMuPDF for parallel cloud transcription...")
+    try:
+        with pymupdf.open(file_path) as doc:
+            total_pages = len(doc)
+    except Exception as e:
+        print(f"Failed to open PDF for OCR: {e}")
         return []
 
-    ocr_elements = []
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         print("Warning: GROQ_API_KEY is not set.")
@@ -38,72 +87,54 @@ def run_cloud_ocr(file_path):
             temperature=0
         )
     except Exception as e:
-        print(e)
+        print(f"Failed to initialize vision LLM: {e}")
         return []
 
-    for page_num in range(len(doc)):
-        num = page_num + 1
-        total = len(doc)
-        print("Running OCR transcription on page " + str(num) + "/" + str(total) + "...")
-        try:
-            page = doc[page_num]
-            pix = page.get_pixmap(dpi=150)
-            img_bytes = pix.tobytes("png")
+    ocr_elements = []
+    # Parallelize up to 4 concurrent page OCR calls
+    max_workers = min(4, total_pages) if total_pages > 0 else 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_process_single_page_ocr, vision_llm, file_path, p, total_pages): p
+            for p in range(total_pages)
+        }
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res:
+                ocr_elements.append(res)
 
-            base64_image = base64.b64encode(img_bytes).decode("utf-8")
-
-            message = HumanMessage(
-                content=[
-                    {
-                        "type": "text", 
-                        "text": "Transcribe all text, numbers, and structured table data from this page image exactly as they appear. Do not summarize, format, or add any commentary. Output only the transcribed text."
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": "data:image/png;base64," + base64_image
-                        }
-                    }
-                ]
-            )
-
-            response = vision_llm.invoke([message])
-            transcribed_text = response.content.strip()
-
-            if transcribed_text:
-                doc_element = Document(
-                    page_content=transcribed_text,
-                    metadata={
-                        "source": os.path.basename(file_path),
-                        "page": page_num
-                    }
-                )
-                ocr_elements.append(doc_element)
-        except Exception as e:
-            print(e)
-
+    # Sort results by original page order
+    ocr_elements.sort(key=lambda d: d.metadata.get("page", 0))
     return ocr_elements
 
 def partition_document(file_path):
     if not os.path.exists(file_path):
         raise FileNotFoundError("PDF not found at: " + file_path)
 
-    print("Loading file: " + file_path)
+    print("Loading file with PyMuPDF: " + file_path)
     start = time.time()
     try:
-        loader = PyPDFLoader(file_path)
-        elements = loader.load()
+        elements = []
+        total_chars = 0
+        with pymupdf.open(file_path) as doc:
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                text = page.get_text("text")
+                cleaned = text.strip()
+                total_chars += len(cleaned)
+                elements.append(
+                    Document(
+                        page_content=text,
+                        metadata={
+                            "source": os.path.basename(file_path),
+                            "page": page_num
+                        }
+                    )
+                )
     except Exception as e:
-        raise RuntimeError("Failed to load PDF: " + str(e))
+        raise RuntimeError("Failed to load PDF with PyMuPDF: " + str(e))
 
-    total_chars = 0
-    for i in range(len(elements)):
-        doc = elements[i]
-        txt = doc.page_content
-        cleaned = txt.strip()
-        total_chars = total_chars + len(cleaned)
-    
-    print("Standard load complete. Total characters: " + str(total_chars))
+    print(f"PyMuPDF load complete ({round(time.time() - start, 2)}s). Total characters: {total_chars}")
 
     if total_chars < 150:
         print("Standard PDF loader extracted minimal text. Falling back to Cloud Vision OCR...")

@@ -25,14 +25,17 @@ from document_ingestion import (
 from hybrid_retrieval import hybrid_retrieve
 from agent import StudyAgent
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from dotenv import load_dotenv
-
-load_dotenv()
+base_dir = os.path.dirname(os.path.abspath(__file__))
+env_file = os.path.join(base_dir, ".env")
+if os.path.exists(env_file):
+    load_dotenv(dotenv_path=env_file)
+else:
+    load_dotenv()
 
 app = FastAPI()
 
-base_dir = os.path.dirname(os.path.abspath(__file__))
 upload_folder = os.path.join(base_dir, "uploads")
 persist_dir = os.path.join(base_dir, "chroma_db")
 frontend_dist_path = os.path.abspath(os.path.join(base_dir, "../frontend/dist"))
@@ -90,18 +93,22 @@ def get_llm():
     primary_llm = ChatGroq(
         model="groq/compound-mini",
         api_key=api_key,
+        temperature=0.0,
     )
     fallback_llm1 = ChatGroq(
         model="groq/compound",
         api_key=api_key,
+        temperature=0.0,
     )
     fallback_llm2 = ChatGroq(
         model="qwen/qwen3.6-27b",
         api_key=api_key,
+        temperature=0.0,
     )
     fallback_llm3 = ChatGroq(
         model="openai/gpt-oss-20b",
         api_key=api_key,
+        temperature=0.0,
     )
     return primary_llm.with_fallbacks([fallback_llm1, fallback_llm2, fallback_llm3])
 
@@ -110,15 +117,10 @@ _embeddings_instance = None
 def get_embeddings():
     global _embeddings_instance
     if _embeddings_instance is None:
-        try:
-            import torch
-            torch.set_num_threads(1)
-        except Exception:
-            pass
-        _embeddings_instance = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"batch_size": 16}
+        print("Using FastEmbed (ONNX Runtime - BAAI/bge-small-en-v1.5)...")
+        _embeddings_instance = FastEmbedEmbeddings(
+            model_name="BAAI/bge-small-en-v1.5",
+            max_length=512
         )
     return _embeddings_instance
 

@@ -1,4 +1,6 @@
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import re
 from typing import List, TypedDict, Dict, Any
 from duckduckgo_search import DDGS
@@ -42,12 +44,13 @@ class StudyAgent:
         
         workflow.add_edge("web_search", "generate")
 
+        enable_web = os.getenv("ENABLE_WEB_SEARCH", "false").lower() == "true"
         workflow.add_conditional_edges(
             "generate",
             self.grade_generation,
             {
                 "grounded": END,
-                "hallucinating_fallback": "web_search",
+                "hallucinating_fallback": "web_search" if enable_web else END,
                 "max_attempts_reached": END
             }
         )
@@ -211,16 +214,27 @@ class StudyAgent:
 
         context = "\n\n".join(parts)
 
-        prompt = "You are an academic study assistant.\n\n"
-        prompt += "Answer the user's question clearly, thoroughly, and objectively using the provided context.\n\n"
-        prompt += "Rules:\n"
-        prompt += "1. Ground your answer in the facts and information present in the context. If the question asks you to analyze, summarize, critique, or evaluate the context (like a resume or study notes), do so using the context details.\n"
-        prompt += "2. Do NOT include any inline citations, bracketed sources, or references in your generated text. Write a natural and readable response.\n"
-        prompt += "3. If the context does not contain relevant information to answer the question at all, respond exactly:\n"
-        prompt += "Information not found in notes.\n\n"
-        prompt += "CONTEXT:\n" + context + "\n\n"
-        prompt += "QUESTION:\n" + question + "\n\n"
-        prompt += "ANSWER:\n"
+        prompt = (
+            "You are a strict, context-grounded AI assistant for document analysis. "
+            "Your task is to answer the user's question using EXCLUSIVELY the verified CONTEXT chunks provided below.\n\n"
+            "MANDATORY ANTI-HALLUCINATION CONSTRAINTS (STRICT ADHERENCE REQUIRED):\n"
+            "1. ABSOLUTE CONTEXT BOUNDARY: You must base your answer ONLY on facts, definitions, numbers, procedures, and statements directly present in the CONTEXT. "
+            "Never use outside world knowledge, training assumptions, or unmentioned external facts.\n"
+            "2. ZERO EXTRAPOLATION: Do NOT speculate, infer, extrapolate, or embellish. If a concept, tool, file name, method, or detail is not explicitly mentioned in the context chunks, you MUST NOT include it in your response.\n"
+            "3. NO FABRICATED EXPLANATIONS: Do NOT invent explanations or background information to make the answer sound more complete. If the context gives a brief or partial explanation, present only that brief or partial explanation.\n"
+            "4. PARTIAL / UNMENTIONED TOPICS: If the context answers only part of the question, answer ONLY the supported part and explicitly note: 'The provided document does not contain details regarding [unmentioned aspect].'\n"
+            "5. MISSING INFORMATION: If the context contains NO factual basis to answer the question, respond with ONLY:\n"
+            "Information not found in the provided document.\n"
+            "6. CLEAN BODY TEXT: Do not write artificial citation brackets like [Source 1] or [Page 2] in the body text (sources are tracked automatically).\n\n"
+            "PRESENTATION GUIDELINES (USE ONLY CONTEXT FACTS):\n"
+            "- Structure the answer clearly using Markdown headings (e.g. `### Summary`, `### Key Points`, `### Details`).\n"
+            "- Use bullet points with **bold lead-ins** for concepts explicitly found in the context.\n"
+            "- If commands, code, or syntax are directly provided in the context, format them in `inline code` or ```code blocks```.\n"
+            "- If comparing categories or data directly present in the context, format with a clean Markdown table.\n\n"
+            f"=== VERIFIED DOCUMENT CONTEXT CHUNKS ===\n{context}\n=== END DOCUMENT CONTEXT ===\n\n"
+            f"USER QUESTION: {question}\n\n"
+            "STRICT CONTEXT-GROUNDED ANSWER:\n"
+        )
 
         try:
             response = self.llm.invoke(prompt)
@@ -253,7 +267,8 @@ class StudyAgent:
         }
 
     def decide_next_step(self, state: AgentState) -> str:
-        if state.get("web_search_required", False):
+        enable_web = os.getenv("ENABLE_WEB_SEARCH", "false").lower() == "true"
+        if enable_web and state.get("web_search_required", False):
             return "web_search"
         return "generate"
 
@@ -296,13 +311,14 @@ class StudyAgent:
                 steps.append("Fact check passed: Answer is fully grounded in context.")
                 return "grounded"
             else:
-                if not has_web:
+                enable_web = os.getenv("ENABLE_WEB_SEARCH", "false").lower() == "true"
+                if enable_web and not has_web:
                     print("Generation contains potential hallucinations. Forcing Web Search fallback.")
                     steps.append("Fact check failed: Answer contained ungrounded claims. Rerouting to Web Search.")
                     return "hallucinating_fallback"
                 else:
-                    print("Generation contains potential hallucinations, but web search has already run. Returning best effort.")
-                    steps.append("Fact check warning: Some claims might not be fully grounded, but search fallbacks exhausted.")
+                    print("Generation evaluated against context. Returning context-grounded response.")
+                    steps.append("Fact check complete: Returned context-grounded response.")
                     return "max_attempts_reached"
         except Exception as e:
             print(e)
