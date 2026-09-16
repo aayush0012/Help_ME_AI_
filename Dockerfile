@@ -13,6 +13,12 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Install system packages including Tesseract OCR for scanned PDF ingestion
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    libtesseract-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set up a non-root user (good security practice and standard on PaaS)
 RUN useradd -m -u 1000 user
 USER user

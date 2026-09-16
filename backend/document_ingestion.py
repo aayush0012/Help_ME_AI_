@@ -2,14 +2,15 @@ import os
 import hashlib
 import time
 import base64
+import io
 import concurrent.futures
+from PIL import Image
+import pytesseract
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 import pymupdf
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
 env_file = os.path.join(base_dir, ".env")
@@ -21,91 +22,26 @@ else:
 chunk_size_val = 1000
 chunk_overlap_val = 200
 
-def _process_single_page_ocr(vision_llm, file_path, page_num, total_pages):
+def _ocr_single_page(file_path, page_num, total_pages):
     num = page_num + 1
-    print(f"Running OCR transcription on page {num}/{total_pages}...")
     try:
-        # Open separate doc handle per thread for thread safety
         with pymupdf.open(file_path) as doc:
             page = doc[page_num]
             pix = page.get_pixmap(dpi=150)
-            img_bytes = pix.tobytes("png")
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
 
-        base64_image = base64.b64encode(img_bytes).decode("utf-8")
-
-        message = HumanMessage(
-            content=[
-                {
-                    "type": "text", 
-                    "text": (
-                        "Transcribe all academic text, headings, mathematical formulas (format in LaTeX $...$ or $$...$$), "
-                        "and tables from this page image. Output only the clean transcribed text without conversational commentary."
-                    )
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": "data:image/png;base64," + base64_image
-                    }
-                }
-            ]
-        )
-
-        response = vision_llm.invoke([message])
-        transcribed_text = response.content.strip()
-
-        if transcribed_text:
+        text = pytesseract.image_to_string(img).strip()
+        if text:
             return Document(
-                page_content=transcribed_text,
+                page_content=text,
                 metadata={
                     "source": os.path.basename(file_path),
                     "page": page_num
                 }
             )
     except Exception as e:
-        print(f"OCR error on page {num}: {e}")
+        print(f"OCR warning on page {num}: {e}")
     return None
-
-def run_cloud_ocr(file_path):
-    print("Opening PDF with PyMuPDF for parallel cloud transcription...")
-    try:
-        with pymupdf.open(file_path) as doc:
-            total_pages = len(doc)
-    except Exception as e:
-        print(f"Failed to open PDF for OCR: {e}")
-        return []
-
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        print("Warning: GROQ_API_KEY is not set.")
-        return []
-
-    try:
-        vision_llm = ChatGroq(
-            model="llama-3.2-11b-vision-preview",
-            api_key=api_key,
-            temperature=0
-        )
-    except Exception as e:
-        print(f"Failed to initialize vision LLM: {e}")
-        return []
-
-    ocr_elements = []
-    # Parallelize up to 4 concurrent page OCR calls
-    max_workers = min(4, total_pages) if total_pages > 0 else 1
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_process_single_page_ocr, vision_llm, file_path, p, total_pages): p
-            for p in range(total_pages)
-        }
-        for future in concurrent.futures.as_completed(futures):
-            res = future.result()
-            if res:
-                ocr_elements.append(res)
-
-    # Sort results by original page order
-    ocr_elements.sort(key=lambda d: d.metadata.get("page", 0))
-    return ocr_elements
 
 def partition_document(file_path):
     if not os.path.exists(file_path):
@@ -113,40 +49,65 @@ def partition_document(file_path):
 
     print("Loading file with PyMuPDF: " + file_path)
     start = time.time()
+    elements = []
+    scanned_pages = []
+    total_pages = 0
+
     try:
-        elements = []
-        total_chars = 0
         with pymupdf.open(file_path) as doc:
-            for page_num in range(len(doc)):
+            total_pages = len(doc)
+            for page_num in range(total_pages):
                 page = doc[page_num]
-                text = page.get_text("text")
-                cleaned = text.strip()
-                total_chars += len(cleaned)
-                elements.append(
-                    Document(
-                        page_content=text,
-                        metadata={
-                            "source": os.path.basename(file_path),
-                            "page": page_num
-                        }
+                text = page.get_text("text").strip()
+                # If page has substantial digital text (>= 100 characters), use digital extraction directly
+                if len(text) >= 100:
+                    elements.append(
+                        Document(
+                            page_content=text,
+                            metadata={
+                                "source": os.path.basename(file_path),
+                                "page": page_num
+                            }
+                        )
                     )
-                )
+                else:
+                    # Page has minimal or no selectable text (scanned image, photo, or empty/watermark-only)
+                    scanned_pages.append((page_num, text))
     except Exception as e:
-        raise RuntimeError("Failed to load PDF with PyMuPDF: " + str(e))
+        raise RuntimeError("Failed to read PDF with PyMuPDF: " + str(e))
 
-    print(f"PyMuPDF load complete ({round(time.time() - start, 2)}s). Total characters: {total_chars}")
+    print(f"PyMuPDF initial pass: {len(elements)} digital text pages, {len(scanned_pages)} scanned/image pages.")
 
-    if total_chars < 150:
-        print("Standard PDF loader extracted minimal text. Falling back to Cloud Vision OCR...")
-        ocr_elements = run_cloud_ocr(file_path)
-        if len(ocr_elements) > 0:
-            elements = ocr_elements
-            print("Cloud OCR complete. Pages transcribed: " + str(len(elements)))
-        else:
-            print("Cloud OCR returned no pages. Using standard loader output.")
+    # Run parallel OCR on all scanned/image-heavy pages
+    if scanned_pages:
+        print(f"Running OCR on {len(scanned_pages)} scanned pages...")
+        max_workers = min(4, len(scanned_pages))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_ocr_single_page, file_path, p, total_pages): (p, fallback_text)
+                for p, fallback_text in scanned_pages
+            }
+            for future in concurrent.futures.as_completed(futures):
+                p, fallback_text = futures[future]
+                res = future.result()
+                if res and len(res.page_content.strip()) > 10:
+                    elements.append(res)
+                elif fallback_text:
+                    elements.append(
+                        Document(
+                            page_content=fallback_text,
+                            metadata={
+                                "source": os.path.basename(file_path),
+                                "page": p
+                            }
+                        )
+                    )
+
+    # Sort all pages back into their original sequential order
+    elements.sort(key=lambda d: d.metadata.get("page", 0))
 
     elapsed = time.time() - start
-    print("Ingestion load completed in " + str(round(elapsed, 1)) + "s")
+    print(f"Ingestion completed in {round(elapsed, 1)}s. Total pages loaded: {len(elements)}")
     return elements
 
 def chunk_document(elements):
