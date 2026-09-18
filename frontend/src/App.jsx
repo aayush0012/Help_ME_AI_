@@ -8,7 +8,7 @@ import "./App.css";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
-  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "https://help-me-zdr2.onrender.com");
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "");
 
 const getSessionId = () => {
   let sessionId = sessionStorage.getItem("helpme_session_id");
@@ -37,12 +37,40 @@ function App() {
   const [copiedId, setCopiedId] = useState(null);
   const [selectedFileName, setSelectedFileName] = useState("");
   const [slideIndex, setSlideIndex] = useState(0);
+  const [backendReady, setBackendReady] = useState(false);
 
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
+  // Helper: wait for backend to become alive & ready (handles Render cold start)
+  const waitForBackend = async (maxAttempts = 20, intervalMs = 3000) => {
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        const res = await axios.get(`${API_BASE}/health`, { timeout: 5000 });
+        if (res.data?.ready) {
+          setBackendReady(true);
+          return true;
+        }
+        // Server is alive but still warming up (loading models)
+      } catch {
+        // Server is still asleep / cold starting
+      }
+      if (i < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+    }
+    return false;
+  };
+
   // Auto-slide circular loop across all 4 slides (Dashboard + 3 process steps)
   useEffect(() => {
+    // Wake up Render free tier backend automatically when app loads
+    waitForBackend().then((ready) => {
+      if (!ready) {
+        console.warn("Backend did not become ready after polling.");
+      }
+    });
+
     if (!showLanding) return;
     const interval = setInterval(() => {
       setSlideIndex((prev) => (prev + 1) % 4);
@@ -96,31 +124,64 @@ function App() {
     if (!fileToUpload) return;
     setUploading(true);
     setSelectedFileName(fileToUpload.name);
+
+    // Ensure backend is alive before uploading (handles Render cold start)
+    if (!backendReady) {
+      setMessage("Waking up the server… this may take up to 60 seconds on first visit.");
+      const ready = await waitForBackend();
+      if (!ready) {
+        setMessage("Could not reach the server. Please refresh and try again.");
+        setUploading(false);
+        return;
+      }
+    }
+
     setMessage("Extracting passages and indexing hybrid embeddings…");
 
     const formData = new FormData();
     formData.append("file", fileToUpload);
 
-    try {
-      const sessionId = getSessionId();
-      const response = await axios.post(
-        `${API_BASE}/upload?session_id=${sessionId}`,
-        formData
-      );
-      setActiveDocument(fileToUpload.name);
-      setChunksIndexed(response.data.chunks_indexed ?? null);
-      setMessages([]);
-      setMessage(`${fileToUpload.name} is ready for queries.`);
-      if (openWorkspace) {
-        setShowLanding(false);
+    // Retry logic: Render can still drop the connection on slow uploads
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const sessionId = getSessionId();
+        const response = await axios.post(
+          `${API_BASE}/upload?session_id=${sessionId}`,
+          formData,
+          { timeout: 300000 } // 5 minute timeout for large PDFs
+        );
+        setActiveDocument(fileToUpload.name);
+        setChunksIndexed(response.data.chunks_indexed ?? null);
+        setMessages([]);
+        setMessage(`${fileToUpload.name} is ready for queries.`);
+        if (openWorkspace) {
+          setShowLanding(false);
+        }
+        setUploading(false);
+        return; // Success — exit
+      } catch (err) {
+        console.error(`Upload attempt ${attempt + 1} failed:`, err);
+        const isNetworkError = !err.response;
+
+        if (isNetworkError && attempt < maxRetries) {
+          // Connection dropped (Render proxy timeout / cold restart) — retry
+          setMessage(`Server connection interrupted. Retrying… (${attempt + 2}/${maxRetries + 1})`);
+          await waitForBackend(10, 3000);
+          continue;
+        }
+
+        // Final failure
+        const detail = err.response?.data?.detail;
+        if (isNetworkError) {
+          setMessage("Server is unavailable. Render free tier may be hibernating — please wait 30s and try again.");
+        } else {
+          setMessage(detail ? `Upload failed: ${detail}` : "Upload failed. Please check backend connection.");
+        }
+        break;
       }
-    } catch (err) {
-      console.error(err);
-      const detail = err.response?.data?.detail;
-      setMessage(detail ? `Upload failed: ${detail}` : "Upload failed. Please check backend connection.");
-    } finally {
-      setUploading(false);
     }
+    setUploading(false);
   };
 
   const handleSend = async () => {
@@ -158,12 +219,15 @@ function App() {
       console.error(err);
       setThinking(false);
       const detail = err.response?.data?.detail;
+      const errorMsg = !err.response
+        ? "Server connection interrupted or server waking up. Please retry in a few moments."
+        : (detail || "Unable to connect to server. Please ingest a document first.");
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now(),
           sender: "bot",
-          text: detail || "Unable to connect to server. Please ingest a document first.",
+          text: errorMsg,
           sources: [],
         },
       ]);

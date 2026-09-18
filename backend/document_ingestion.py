@@ -28,9 +28,12 @@ def _ocr_single_page(file_path, page_num, total_pages):
         with pymupdf.open(file_path) as doc:
             page = doc[page_num]
             pix = page.get_pixmap(dpi=150)
-            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            img_bytes = pix.tobytes("png")
+            del pix
+            img = Image.open(io.BytesIO(img_bytes))
 
         text = pytesseract.image_to_string(img).strip()
+        del img
         if text:
             return Document(
                 page_content=text,
