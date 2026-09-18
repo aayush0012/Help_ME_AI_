@@ -8,7 +8,7 @@ import "./App.css";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
-  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "https://help-me-zdr2.onrender.com");
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "/api");
 
 const getSessionId = () => {
   let sessionId = sessionStorage.getItem("helpme_session_id");
