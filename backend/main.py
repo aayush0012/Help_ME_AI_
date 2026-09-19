@@ -156,8 +156,12 @@ _embeddings_instance = None
 def get_embeddings():
     global _embeddings_instance
     if _embeddings_instance is None:
+        # Only use HuggingFace Inference API if explicitly opted in.
+        # The free-tier HF endpoint can cold-start or hang for 60s+,
+        # which blocks startup warmup and upload ingestion.
+        use_hf = os.getenv("USE_HF_EMBEDDINGS", "false").lower() == "true"
         hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") or os.getenv("HF_TOKEN")
-        if hf_token:
+        if use_hf and hf_token:
             try:
                 from langchain_huggingface import HuggingFaceEndpointEmbeddings
                 print("Using HuggingFace Endpoint Embeddings (sentence-transformers/all-MiniLM-L6-v2)...")
