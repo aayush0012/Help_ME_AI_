@@ -156,9 +156,21 @@ _embeddings_instance = None
 def get_embeddings():
     global _embeddings_instance
     if _embeddings_instance is None:
-        # Only use HuggingFace Inference API if explicitly opted in.
-        # The free-tier HF endpoint can cold-start or hang for 60s+,
-        # which blocks startup warmup and upload ingestion.
+        # 1. Google Gemini Embeddings (Zero server RAM consumption)
+        google_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if google_key and google_key.strip():
+            try:
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings
+                print("Using Google Gemini Embeddings (models/text-embedding-004 - zero local RAM)...")
+                _embeddings_instance = GoogleGenerativeAIEmbeddings(
+                    model="models/text-embedding-004",
+                    google_api_key=google_key.strip("'\" \t\r\n")
+                )
+                return _embeddings_instance
+            except Exception as e:
+                print(f"Warning: Google GenAI Embeddings failed ({e}), trying fallback...")
+
+        # 2. HuggingFace Inference API (Optional, if explicitly requested)
         use_hf = os.getenv("USE_HF_EMBEDDINGS", "false").lower() == "true"
         hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") or os.getenv("HF_TOKEN")
         if use_hf and hf_token:
@@ -169,15 +181,17 @@ def get_embeddings():
                     model="sentence-transformers/all-MiniLM-L6-v2",
                     huggingfacehub_api_token=hf_token.strip("'\" \t\r\n"),
                 )
+                return _embeddings_instance
             except Exception as e:
                 print(f"Warning: HF Endpoint failed ({e}), falling back to FastEmbed...")
 
-        if _embeddings_instance is None:
-            print("Using FastEmbed (ONNX Runtime - BAAI/bge-small-en-v1.5)...")
-            _embeddings_instance = FastEmbedEmbeddings(
-                model_name="BAAI/bge-small-en-v1.5",
-                max_length=512
-            )
+        # 3. Default: FastEmbed (ONNX Runtime - lightweight local embedding)
+        print("Using FastEmbed (ONNX Runtime - BAAI/bge-small-en-v1.5)...")
+        _embeddings_instance = FastEmbedEmbeddings(
+            model_name="BAAI/bge-small-en-v1.5",
+            max_length=512,
+            threads=1
+        )
     return _embeddings_instance
 
 class ChatRequest(BaseModel):

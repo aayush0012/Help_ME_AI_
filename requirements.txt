@@ -21,7 +21,6 @@ langgraph
 duckduckgo-search
 flashrank
 fastembed
-sentence-transformers
 langchain-google-genai
 pytesseract
 pillow
