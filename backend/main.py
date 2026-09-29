@@ -99,6 +99,7 @@ class CORSOnAllResponses(BaseHTTPMiddleware):
 app.add_middleware(CORSOnAllResponses)
 
 @app.get("/health")
+@app.get("/status")
 def health_check():
     return {
         "status": "ok",
