@@ -4,8 +4,13 @@ import time
 import base64
 import io
 import concurrent.futures
-from PIL import Image
-import pytesseract
+try:
+    from PIL import Image
+    import pytesseract
+    _HAS_OCR = True
+except ImportError:
+    _HAS_OCR = False
+
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
@@ -23,11 +28,13 @@ chunk_size_val = 1000
 chunk_overlap_val = 200
 
 def _ocr_single_page(file_path, page_num, total_pages):
+    if not _HAS_OCR:
+        return None
     num = page_num + 1
     try:
         with pymupdf.open(file_path) as doc:
             page = doc[page_num]
-            pix = page.get_pixmap(dpi=150)
+            pix = page.get_pixmap(dpi=130)
             img_bytes = pix.tobytes("png")
             del pix
             img = Image.open(io.BytesIO(img_bytes))
@@ -43,7 +50,7 @@ def _ocr_single_page(file_path, page_num, total_pages):
                 }
             )
     except Exception as e:
-        print(f"OCR warning on page {num}: {e}")
+        print(f"OCR note on page {num}: {e}")
     return None
 
 def partition_document(file_path):
@@ -54,7 +61,6 @@ def partition_document(file_path):
     start = time.time()
     elements = []
     scanned_pages = []
-    total_pages = 0
 
     try:
         with pymupdf.open(file_path) as doc:
@@ -62,8 +68,8 @@ def partition_document(file_path):
             for page_num in range(total_pages):
                 page = doc[page_num]
                 text = page.get_text("text").strip()
-                # If page has substantial digital text (>= 100 characters), use digital extraction directly
-                if len(text) >= 100:
+                # If page has extractable digital text (>= 20 chars), use it directly
+                if len(text) >= 20:
                     elements.append(
                         Document(
                             page_content=text,
@@ -74,14 +80,27 @@ def partition_document(file_path):
                         )
                     )
                 else:
-                    # Page has minimal or no selectable text (scanned image, photo, or empty/watermark-only)
-                    scanned_pages.append((page_num, text))
+                    # Only queue for OCR if page contains actual embedded images
+                    images = page.get_images()
+                    if images and len(images) > 0:
+                        scanned_pages.append((page_num, text))
+                    elif text:
+                        # Short text on page without images
+                        elements.append(
+                            Document(
+                                page_content=text,
+                                metadata={
+                                    "source": os.path.basename(file_path),
+                                    "page": page_num
+                                }
+                            )
+                        )
     except Exception as e:
         raise RuntimeError("Failed to read PDF with PyMuPDF: " + str(e))
 
-    print(f"PyMuPDF initial pass: {len(elements)} digital text pages, {len(scanned_pages)} scanned/image pages.")
+    print(f"PyMuPDF initial pass: {len(elements)} digital text pages, {len(scanned_pages)} image-heavy pages.")
 
-    # Run parallel OCR on all scanned/image-heavy pages
+    # Run parallel OCR only on truly scanned/image-heavy pages
     if scanned_pages:
         print(f"Running OCR on {len(scanned_pages)} scanned pages...")
         max_workers = min(4, len(scanned_pages))
@@ -92,19 +111,32 @@ def partition_document(file_path):
             }
             for future in concurrent.futures.as_completed(futures):
                 p, fallback_text = futures[future]
-                res = future.result()
-                if res and len(res.page_content.strip()) > 10:
-                    elements.append(res)
-                elif fallback_text:
-                    elements.append(
-                        Document(
-                            page_content=fallback_text,
-                            metadata={
-                                "source": os.path.basename(file_path),
-                                "page": p
-                            }
+                try:
+                    res = future.result()
+                    if res and len(res.page_content.strip()) > 10:
+                        elements.append(res)
+                    elif fallback_text:
+                        elements.append(
+                            Document(
+                                page_content=fallback_text,
+                                metadata={
+                                    "source": os.path.basename(file_path),
+                                    "page": p
+                                }
+                            )
                         )
-                    )
+                except Exception as ex:
+                    print(f"OCR error on page {p + 1}: {ex}")
+                    if fallback_text:
+                        elements.append(
+                            Document(
+                                page_content=fallback_text,
+                                metadata={
+                                    "source": os.path.basename(file_path),
+                                    "page": p
+                                }
+                            )
+                        )
 
     # Sort all pages back into their original sequential order
     elements.sort(key=lambda d: d.metadata.get("page", 0))

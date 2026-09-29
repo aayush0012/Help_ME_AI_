@@ -43,17 +43,16 @@ function App() {
   const messagesEndRef = useRef(null);
 
   // Helper: wait for backend to become alive & ready (handles Render cold start)
-  const waitForBackend = async (maxAttempts = 20, intervalMs = 3000) => {
+  const waitForBackend = async (maxAttempts = 35, intervalMs = 3000) => {
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        const res = await axios.get(`${API_BASE}/health`, { timeout: 5000 });
-        if (res.data?.ready) {
+        const res = await axios.get(`${API_BASE}/health`, { timeout: 6000 });
+        if (res.data?.ready || res.data?.status === "ok") {
           setBackendReady(true);
           return true;
         }
-        // Server is alive but still warming up (loading models)
       } catch {
-        // Server is still asleep / cold starting
+        // Server is still waking up / cold starting
       }
       if (i < maxAttempts - 1) {
         await new Promise((r) => setTimeout(r, intervalMs));

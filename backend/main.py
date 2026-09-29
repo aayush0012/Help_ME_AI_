@@ -205,50 +205,54 @@ async def upload_pdf(
         safe_filename = os.path.basename(filename)
         session_upload_folder, session_persist_dir = get_session_paths(session_id)
 
-        if os.path.exists(session_persist_dir):
-            try:
-                import chromadb
-                client = chromadb.PersistentClient(path=session_persist_dir)
-                collections = client.list_collections()
-                for i in range(len(collections)):
-                    col = collections[i]
-                    client.delete_collection(col.name)
-            except Exception as e:
-                print(e)
-
-        print("Saving file")
+        print("Saving file: " + safe_filename)
         file_path = os.path.join(session_upload_folder, safe_filename)
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        print("Partitioning PDF")
-        elements = partition_document(file_path)
+        import asyncio
+        loop = asyncio.get_event_loop()
 
-        print("Chunking elements")
-        chunks = chunk_document(elements)
+        def _process_file():
+            if os.path.exists(session_persist_dir):
+                try:
+                    import chromadb
+                    client = chromadb.PersistentClient(path=session_persist_dir)
+                    collections = client.list_collections()
+                    for col in collections:
+                        client.delete_collection(col.name)
+                except Exception as e:
+                    print(f"Note clearing collection: {e}")
 
-        print("Processing chunks")
-        processed_documents = process_chunks(chunks, source_name=safe_filename)
+            print("Partitioning PDF")
+            elements = partition_document(file_path)
 
-        if len(processed_documents) == 0:
-            raise HTTPException(
-                status_code=422,
-                detail="No usable content could be extracted from this PDF",
-            )
+            print("Chunking elements")
+            chunks = chunk_document(elements)
 
-        print("Creating vectorstore")
-        create_vectorstore(processed_documents, persist_directory=session_persist_dir)
+            print("Processing chunks")
+            processed_documents = process_chunks(chunks, source_name=safe_filename)
+
+            if len(processed_documents) == 0:
+                raise ValueError("No usable content could be extracted from this PDF")
+
+            print("Creating vectorstore")
+            create_vectorstore(processed_documents, persist_directory=session_persist_dir)
+            return len(processed_documents)
+
+        chunks_count = await loop.run_in_executor(None, _process_file)
 
         print("Done")
-        res = {
+        return {
             "message": "PDF processed successfully",
-            "chunks_indexed": len(processed_documents)
+            "chunks_indexed": chunks_count
         }
-        return res
 
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {type(e).__name__}: {str(e)}")
