@@ -162,36 +162,7 @@ _embeddings_instance = None
 def get_embeddings():
     global _embeddings_instance
     if _embeddings_instance is None:
-        # 1. Google Gemini Embeddings (Zero server RAM consumption)
-        google_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if google_key and google_key.strip():
-            try:
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
-                print("Using Google Gemini Embeddings (models/text-embedding-004 - zero local RAM)...")
-                _embeddings_instance = GoogleGenerativeAIEmbeddings(
-                    model="models/text-embedding-004",
-                    google_api_key=google_key.strip("'\" \t\r\n")
-                )
-                return _embeddings_instance
-            except Exception as e:
-                print(f"Warning: Google GenAI Embeddings failed ({e}), trying fallback...")
-
-        # 2. HuggingFace Inference API (Optional, if explicitly requested)
-        use_hf = os.getenv("USE_HF_EMBEDDINGS", "false").lower() == "true"
-        hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN") or os.getenv("HF_TOKEN")
-        if use_hf and hf_token:
-            try:
-                from langchain_huggingface import HuggingFaceEndpointEmbeddings
-                print("Using HuggingFace Endpoint Embeddings (sentence-transformers/all-MiniLM-L6-v2)...")
-                _embeddings_instance = HuggingFaceEndpointEmbeddings(
-                    model="sentence-transformers/all-MiniLM-L6-v2",
-                    huggingfacehub_api_token=hf_token.strip("'\" \t\r\n"),
-                )
-                return _embeddings_instance
-            except Exception as e:
-                print(f"Warning: HF Endpoint failed ({e}), falling back to FastEmbed...")
-
-        # 3. Default: FastEmbed (ONNX Runtime - lightweight local embedding)
+        # Default: FastEmbed (ONNX Runtime - 100% free, local, zero rate limits)
         print("Using FastEmbed (ONNX Runtime - BAAI/bge-small-en-v1.5)...")
         _embeddings_instance = FastEmbedEmbeddings(
             model_name="BAAI/bge-small-en-v1.5",
