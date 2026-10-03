@@ -46,7 +46,10 @@ function App() {
   const waitForBackend = async (maxAttempts = 35, intervalMs = 3000) => {
     for (let i = 0; i < maxAttempts; i++) {
       try {
-        const res = await axios.get(`${API_BASE}/status`, { timeout: 6000 });
+        const res = await axios.get(`${API_BASE}/status?_t=${Date.now()}`, {
+          timeout: 6000,
+          headers: { "Cache-Control": "no-cache" }
+        });
         if (res.data?.ready || res.data?.status === "ok") {
           setBackendReady(true);
           return true;

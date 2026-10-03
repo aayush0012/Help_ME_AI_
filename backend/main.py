@@ -103,11 +103,14 @@ app.add_middleware(CORSOnAllResponses)
 @app.get("/api/health")
 @app.get("/api/status")
 def health_check():
-    return {
-        "status": "ok",
-        "ready": _backend_ready,
-        "message": "HelpMe AI backend is alive and ready" if _backend_ready else "Backend is warming up..."
-    }
+    return JSONResponse(
+        content={
+            "status": "ok",
+            "ready": _backend_ready,
+            "message": "HelpMe AI backend is alive and ready" if _backend_ready else "Backend is warming up..."
+        },
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"}
+    )
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
