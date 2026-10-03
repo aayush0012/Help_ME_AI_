@@ -100,6 +100,8 @@ app.add_middleware(CORSOnAllResponses)
 
 @app.get("/health")
 @app.get("/status")
+@app.get("/api/health")
+@app.get("/api/status")
 def health_check():
     return {
         "status": "ok",
@@ -206,6 +208,7 @@ def home():
     return {"message": "RAG Backend Running"}
 
 @app.post("/upload")
+@app.post("/api/upload")
 async def upload_pdf(
     file: UploadFile = File(...),
     session_id: str = Query(None)
@@ -273,6 +276,7 @@ async def upload_pdf(
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {type(e).__name__}: {str(e)}")
 
 @app.post("/chat")
+@app.post("/api/chat")
 async def chat(
     request: ChatRequest = None,
     question: str = Query(None),
