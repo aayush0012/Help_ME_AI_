@@ -4,10 +4,11 @@ import time
 import base64
 import io
 import concurrent.futures
+import shutil
 try:
     from PIL import Image
     import pytesseract
-    _HAS_OCR = True
+    _HAS_OCR = bool(shutil.which("tesseract"))
 except ImportError:
     _HAS_OCR = False
 
@@ -100,43 +101,57 @@ def partition_document(file_path):
 
     print(f"PyMuPDF initial pass: {len(elements)} digital text pages, {len(scanned_pages)} image-heavy pages.")
 
-    # Run parallel OCR only on truly scanned/image-heavy pages
+    # Run parallel OCR only on truly scanned/image-heavy pages if OCR binary exists
     if scanned_pages:
-        print(f"Running OCR on {len(scanned_pages)} scanned pages...")
-        max_workers = min(4, len(scanned_pages))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(_ocr_single_page, file_path, p, total_pages): (p, fallback_text)
-                for p, fallback_text in scanned_pages
-            }
-            for future in concurrent.futures.as_completed(futures):
-                p, fallback_text = futures[future]
-                try:
-                    res = future.result()
-                    if res and len(res.page_content.strip()) > 10:
-                        elements.append(res)
-                    elif fallback_text:
-                        elements.append(
-                            Document(
-                                page_content=fallback_text,
-                                metadata={
-                                    "source": os.path.basename(file_path),
-                                    "page": p
-                                }
+        if _HAS_OCR:
+            print(f"Running OCR on {len(scanned_pages)} scanned pages...")
+            max_workers = min(4, len(scanned_pages))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(_ocr_single_page, file_path, p, total_pages): (p, fallback_text)
+                    for p, fallback_text in scanned_pages
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    p, fallback_text = futures[future]
+                    try:
+                        res = future.result()
+                        if res and len(res.page_content.strip()) > 10:
+                            elements.append(res)
+                        elif fallback_text:
+                            elements.append(
+                                Document(
+                                    page_content=fallback_text,
+                                    metadata={
+                                        "source": os.path.basename(file_path),
+                                        "page": p
+                                    }
+                                )
                             )
-                        )
-                except Exception as ex:
-                    print(f"OCR error on page {p + 1}: {ex}")
-                    if fallback_text:
-                        elements.append(
-                            Document(
-                                page_content=fallback_text,
-                                metadata={
-                                    "source": os.path.basename(file_path),
-                                    "page": p
-                                }
+                    except Exception as ex:
+                        print(f"OCR error on page {p + 1}: {ex}")
+                        if fallback_text:
+                            elements.append(
+                                Document(
+                                    page_content=fallback_text,
+                                    metadata={
+                                        "source": os.path.basename(file_path),
+                                        "page": p
+                                    }
+                                )
                             )
+        else:
+            print("Tesseract binary not installed on host, skipping OCR pass.")
+            for p, fallback_text in scanned_pages:
+                if fallback_text and len(fallback_text.strip()) > 0:
+                    elements.append(
+                        Document(
+                            page_content=fallback_text,
+                            metadata={
+                                "source": os.path.basename(file_path),
+                                "page": p
+                            }
                         )
+                    )
 
     # Sort all pages back into their original sequential order
     elements.sort(key=lambda d: d.metadata.get("page", 0))
