@@ -9,16 +9,32 @@ def tokenize_text(text: str) -> list[str]:
 
 def get_all_documents(vectorstore) -> list[Document]:
     try:
-        data = vectorstore.get()
+        client = vectorstore.client
+        collection_name = vectorstore.collection_name
+
+        all_points = []
+        next_offset = None
+        while True:
+            points, next_offset = client.scroll(
+                collection_name=collection_name,
+                limit=100,
+                offset=next_offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            all_points.extend(points)
+            if next_offset is None:
+                break
+
         documents = []
-        if not data or "documents" not in data or not data["documents"]:
-            return []
-        
-        for doc_text, metadata in zip(data["documents"], data["metadatas"]):
-            documents.append(Document(page_content=doc_text, metadata=metadata or {}))
+        for point in all_points:
+            payload = point.payload or {}
+            page_content = payload.get("page_content", "")
+            metadata = payload.get("metadata", {})
+            documents.append(Document(page_content=page_content, metadata=metadata))
         return documents
     except Exception as e:
-        print(f"Error fetching all documents from Chroma: {e}")
+        print(f"Error fetching all documents from Qdrant: {e}")
         return []
 
 def hybrid_retrieve(vectorstore, query: str, k: int = 5) -> list[tuple[Document, float]]:

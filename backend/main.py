@@ -23,7 +23,8 @@ from document_ingestion import (
 )
 from hybrid_retrieval import hybrid_retrieve
 from agent import StudyAgent
-from langchain_chroma import Chroma
+from langchain_qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from dotenv import load_dotenv
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -54,21 +55,29 @@ async def startup_warmup():
     _backend_ready = True
 
 upload_folder = os.path.join(base_dir, "uploads")
-persist_dir = os.path.join(base_dir, "chroma_db")
+# Qdrant Cloud config is loaded from .env (QDRANT_URL, QDRANT_API_KEY)
 frontend_dist_path = os.path.abspath(os.path.join(base_dir, "../frontend/dist"))
 
 os.makedirs(upload_folder, exist_ok=True)
 
-def get_session_paths(session_id, create=True):
+def get_session_upload_folder(session_id, create=True):
     if not session_id or not re.match(r"^[a-zA-Z0-9_\-]+$", session_id):
-        return upload_folder, persist_dir
-    
+        return upload_folder
     session_upload = os.path.join(upload_folder, session_id)
-    session_persist = os.path.join(persist_dir, session_id)
     if create:
         os.makedirs(session_upload, exist_ok=True)
-        os.makedirs(session_persist, exist_ok=True)
-    return session_upload, session_persist
+    return session_upload
+
+def get_collection_name(session_id):
+    if not session_id or not re.match(r"^[a-zA-Z0-9_\-]+$", session_id):
+        return "rag_default"
+    return "rag_" + session_id
+
+def get_qdrant_client():
+    return QdrantClient(
+        url=os.getenv("QDRANT_URL"),
+        api_key=os.getenv("QDRANT_API_KEY"),
+    )
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -195,7 +204,8 @@ async def upload_pdf(
             raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
         safe_filename = os.path.basename(filename)
-        session_upload_folder, session_persist_dir = get_session_paths(session_id)
+        session_upload_folder = get_session_upload_folder(session_id)
+        collection_name = get_collection_name(session_id)
 
         print("Saving file: " + safe_filename)
         file_path = os.path.join(session_upload_folder, safe_filename)
@@ -207,15 +217,12 @@ async def upload_pdf(
         loop = asyncio.get_event_loop()
 
         def _process_file():
-            if os.path.exists(session_persist_dir):
-                try:
-                    import chromadb
-                    client = chromadb.PersistentClient(path=session_persist_dir)
-                    collections = client.list_collections()
-                    for col in collections:
-                        client.delete_collection(col.name)
-                except Exception as e:
-                    print(f"Note clearing collection: {e}")
+            try:
+                qclient = get_qdrant_client()
+                qclient.delete_collection(collection_name=collection_name)
+                print(f"Cleared existing Qdrant collection: {collection_name}")
+            except Exception as e:
+                print(f"Note: No existing collection to clear ({e})")
 
             print("Partitioning PDF")
             elements = partition_document(file_path)
@@ -230,7 +237,7 @@ async def upload_pdf(
                 raise ValueError("No usable content could be extracted from this PDF")
 
             print("Creating vectorstore")
-            create_vectorstore(processed_documents, persist_directory=session_persist_dir)
+            create_vectorstore(processed_documents, collection_name=collection_name)
             return len(processed_documents)
 
         chunks_count = await loop.run_in_executor(None, _process_file)
@@ -270,17 +277,29 @@ async def chat(
             )
         question = q_val.strip()
 
-        session_upload_folder, session_persist_dir = get_session_paths(session_id, create=False)
+        collection_name = get_collection_name(session_id)
 
-        if not os.path.exists(session_persist_dir) or not os.listdir(session_persist_dir):
+        try:
+            qclient = get_qdrant_client()
+            col_info = qclient.get_collection(collection_name)
+            if col_info.points_count == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No document has been ingested yet. Upload a PDF first.",
+                )
+        except HTTPException:
+            raise
+        except Exception:
             raise HTTPException(
                 status_code=400,
                 detail="No document has been ingested yet. Upload a PDF first.",
             )
 
-        vectorstore = Chroma(
-            persist_directory=session_persist_dir,
-            embedding_function=get_embeddings(),
+        vectorstore = QdrantVectorStore.from_existing_collection(
+            embedding=get_embeddings(),
+            collection_name=collection_name,
+            url=os.getenv("QDRANT_URL"),
+            api_key=os.getenv("QDRANT_API_KEY"),
         )
 
         agent = StudyAgent(vectorstore=vectorstore, llm=get_llm())

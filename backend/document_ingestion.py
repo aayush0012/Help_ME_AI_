@@ -14,7 +14,7 @@ except ImportError:
 
 from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_chroma import Chroma
+from langchain_qdrant import QdrantVectorStore
 from langchain_core.documents import Document
 import pymupdf
 
@@ -203,42 +203,43 @@ def make_doc_id(doc):
     hashed = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return hashed
 
-def create_vectorstore(documents, persist_directory=None):
+def create_vectorstore(documents, collection_name=None):
     from main import get_embeddings
     embeddings = get_embeddings()
 
-    if persist_directory is None:
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        persist_directory = os.path.join(base_dir, "chroma_db")
+    qdrant_url = os.getenv("QDRANT_URL")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY")
 
-    vectorstore = Chroma(
-        persist_directory=persist_directory,
-        embedding_function=embeddings,
-    )
-
-    ids = []
-    for i in range(len(documents)):
-        doc = documents[i]
-        doc_id = make_doc_id(doc)
-        ids.append(doc_id)
+    if collection_name is None:
+        collection_name = "rag_default"
 
     total = len(documents)
     batch_size = 100
     print("Inserting " + str(total) + " documents in batches of " + str(batch_size) + "...")
 
-    for i in range(0, total, batch_size):
+    # Create vectorstore with first batch
+    first_end = min(batch_size, total)
+    vectorstore = QdrantVectorStore.from_documents(
+        documents=documents[:first_end],
+        embedding=embeddings,
+        url=qdrant_url,
+        api_key=qdrant_api_key,
+        collection_name=collection_name,
+    )
+    print("  Inserted " + str(first_end) + "/" + str(total))
+
+    # Add remaining batches
+    for i in range(batch_size, total, batch_size):
         start = i
         end = i + batch_size
         if end > total:
             end = total
-            
+
         batch_docs = []
-        batch_ids = []
         for j in range(start, end):
             batch_docs.append(documents[j])
-            batch_ids.append(ids[j])
 
-        vectorstore.add_documents(documents=batch_docs, ids=batch_ids)
+        vectorstore.add_documents(documents=batch_docs)
         print("  Inserted " + str(end) + "/" + str(total))
 
     return vectorstore

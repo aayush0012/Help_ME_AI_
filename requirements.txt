@@ -6,10 +6,10 @@ langchain
 langchain-core
 langchain-community
 langchain-text-splitters
-langchain-chroma
+langchain-qdrant
 langchain-huggingface
 langchain-groq
-chromadb
+qdrant-client
 pypdf
 requests
 httpx

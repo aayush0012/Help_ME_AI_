@@ -1,21 +1,20 @@
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from langchain_chroma import Chroma
+from langchain_qdrant import QdrantVectorStore
 from main import get_embeddings
 from hybrid_retrieval import hybrid_retrieve
 
 k_val = 5
 
-def load_db():
+def load_db(collection_name="rag_default"):
     embeds = get_embeddings()
-    
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    db_dir = os.path.join(current_dir, "chroma_db")
 
-    db = Chroma(
-        persist_directory=db_dir,
-        embedding_function=embeds,
+    db = QdrantVectorStore.from_existing_collection(
+        embedding=embeds,
+        collection_name=collection_name,
+        url=os.getenv("QDRANT_URL"),
+        api_key=os.getenv("QDRANT_API_KEY"),
     )
     return db
 
