@@ -24,3 +24,5 @@ fastembed
 langchain-google-genai
 pytesseract
 pillow
+langchain-voyageai
+voyageai

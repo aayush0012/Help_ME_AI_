@@ -25,7 +25,7 @@ from hybrid_retrieval import hybrid_retrieve
 from agent import StudyAgent
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_voyageai import VoyageAIEmbeddings
 from dotenv import load_dotenv
 base_dir = os.path.dirname(os.path.abspath(__file__))
 env_file = os.path.join(base_dir, ".env")
@@ -171,12 +171,17 @@ _embeddings_instance = None
 def get_embeddings():
     global _embeddings_instance
     if _embeddings_instance is None:
-        # Default: FastEmbed (ONNX Runtime - 100% free, local, zero rate limits)
-        print("Using FastEmbed (ONNX Runtime - BAAI/bge-small-en-v1.5)...")
-        _embeddings_instance = FastEmbedEmbeddings(
-            model_name="BAAI/bge-small-en-v1.5",
-            max_length=512,
-            threads=1
+        api_key = os.getenv("VOYAGE_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "VOYAGE_API_KEY is not set in environment or backend/.env! "
+                "Please add your Voyage AI API key."
+            )
+        model = os.getenv("VOYAGE_MODEL", "voyage-4-large")
+        print(f"Using Voyage AI Embeddings (model={model})...")
+        _embeddings_instance = VoyageAIEmbeddings(
+            voyage_api_key=api_key,
+            model=model
         )
     return _embeddings_instance
 

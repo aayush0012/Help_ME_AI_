@@ -31,9 +31,6 @@ WORKDIR $HOME/app
 COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Pre-download FastEmbed model during build so no models are downloaded at runtime
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
-
 # Copy built frontend static assets from Stage 1
 COPY --from=frontend-builder --chown=user /app/frontend/dist ./frontend/dist
 
@@ -42,8 +39,8 @@ COPY --chown=user backend/ ./backend/
 
 WORKDIR $HOME/app/backend
 
-# Create uploads and chroma_db directories inside backend
-RUN mkdir -p uploads chroma_db
+# Create uploads directory inside backend
+RUN mkdir -p uploads
 
 EXPOSE 7860
 
