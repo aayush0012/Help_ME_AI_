@@ -205,7 +205,6 @@ CORS_ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
    ```bash
    uvicorn backend.main:app --reload --port 8000
    ```
-   *The API will be available at `http://127.0.0.1:8000`.*
 
 ---
 
@@ -222,28 +221,7 @@ CORS_ALLOWED_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
    ```
 4. Start the frontend development server:
    ```bash
-   npm run dev
-   ```
-   *The web application will be running at `http://localhost:5173`.*
 
----
-
-## 📦 Container Deployment (Docker)
-
-You can build and run the entire application as a single container. The multi-stage build compiles the React application and mounts it static-ly so that the FastAPI backend hosts both the API endpoints and the frontend pages.
-
-### Build the Docker Image
-From the project root directory, run:
-```bash
-docker build -t helpme-ai .
-```
-
-### Run the Docker Container
-Run the container, passing the required environment variables (either directly or via an environment file):
-```bash
-docker run -d -p 7860:7860 --env-file backend/.env helpme-ai
-```
-Open `http://localhost:7860` in your web browser to access the application.
 
 ---
 
